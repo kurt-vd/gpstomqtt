@@ -28,6 +28,7 @@
 
 #include <unistd.h>
 #include <getopt.h>
+#include <fcntl.h>
 #include <locale.h>
 #include <poll.h>
 #include <syslog.h>
@@ -50,12 +51,15 @@
 /* program options */
 static const char help_msg[] =
 	NAME ": Propagate nmea0183 input to MQTT\n"
-	"usage:	" NAME " [OPTIONS ...]\n"
+	"usage:	" NAME " [OPTIONS ...] [FILE|DEVICE]\n"
 	"\n"
 	"Options\n"
 	" -V, --version		Show version\n"
 	" -v, --verbose		Be more verbose\n"
 	" -h, --host=HOST[:PORT]Specify alternate MQTT host+port\n"
+	"\n"
+	"Arguments\n"
+	" FILE|DEVICE	Read input from FILE or DEVICE\n"
 	;
 
 #ifdef _GNU_SOURCE
@@ -433,6 +437,20 @@ int main(int argc, char *argv[])
 	signal(SIGTERM, onsigterm);
 	openlog(NAME, LOG_PERROR, LOG_LOCAL2);
 	setlogmask(logmask);
+
+	if (optind < argc) {
+		/* extra file|device argument */
+		char *file = argv[optind++];
+		int fd;
+
+		/* open file */
+		fd = open(file, O_RDWR | O_NOCTTY | O_NONBLOCK);
+		if (fd < 0)
+			mylog(LOG_ERR, "open %s: %s", file, ESTR(errno));
+		/* set file|device as stdin */
+		dup2(fd, STDIN_FILENO);
+		close(fd);
+	}
 
 	if (mqtt_qos < 0)
 		mqtt_qos = !strcmp(mqtt_host ?: "", "localhost") ? 0 : 1;

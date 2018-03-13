@@ -294,10 +294,10 @@ static void recvd_line(char *line)
 	if (nmea_is_valid_sentence(line) < 0)
 		return;
 	tok = nmea_tok(line);
-	if (strncmp(tok, "GP", 2) && strncmp(tok, "GL", 2) &&
-			strncmp(tok, "LC", 2))
+	if (strlen(tok) <= 2)
 		/* bad line ? */
 		return;
+	/* don't test the precise talker id */
 
 	if (!strcmp(tok+2, "GGA"))
 		recvd_gga();

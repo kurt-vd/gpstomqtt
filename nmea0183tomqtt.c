@@ -259,18 +259,15 @@ static void recvd_gga(void)
 	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
 	publish_topic("gps/fix", "%s", fromtable(strfix, ival) ?: "");
 	/* satvis */
-	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
-	publish_topic("gps/satvis", "%i", ival);
+	publish_topic("gps/satvis", "%i", strtoul(nmea_safe_tok(NULL), NULL, 0));
 	/* unknown */
 	nmea_tok(NULL);
 	/* altitude */
-	dval = nmea_strtod(nmea_safe_tok(NULL));
-	publish_topic("gps/alt", "%.7lf", dval);
+	publish_topic("gps/alt", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
 	/* unknown */
 	nmea_tok(NULL);
 	/* geoidal seperation */
-	dval = nmea_strtod(nmea_safe_tok(NULL));
-	publish_topic("gps/geoid", "%.7lf", dval);
+	publish_topic("gps/geoid", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
 }
 
 static void recvd_gsa(void)

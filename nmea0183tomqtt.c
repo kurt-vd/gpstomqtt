@@ -249,6 +249,10 @@ static void recvd_zda(void)
 
 	tim = timegm(&tm);
 	publish_topic("gps/utc", "%lu", tim);
+
+	static char tstr[128];
+	strftime(tstr, sizeof(tstr), "%a %d %b %Y %H:%M:%S", localtime(&tim));
+	publish_topic("gps/datetime", "%s", tstr);
 }
 
 static void recvd_line(char *line)

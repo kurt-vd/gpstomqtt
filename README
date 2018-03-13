@@ -3,6 +3,10 @@
 nmea0183tomqtt will take input a serial port,
 and forward it's output into (fixed topics in) MQTT.
 
+## reference
+
+http://www.catb.org/gpsd/NMEA.html
+
 ## cross compiling
 
 (Cross-)compiling is performed without using autotools!

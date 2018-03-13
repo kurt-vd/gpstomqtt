@@ -233,6 +233,24 @@ static void recvd_gga(void)
 	publish_topic("gps/geoid", "%.7lf", dval);
 }
 
+static void recvd_zda(void)
+{
+	int val;
+	time_t tim;
+	struct tm tm = {};
+
+	val = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	tm.tm_sec = val % 100; val /= 100;
+	tm.tm_min = val % 100; val /= 100;
+	tm.tm_hour = val;
+	tm.tm_mday = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	tm.tm_mon  = strtoul(nmea_safe_tok(NULL), NULL, 10) - 1;
+	tm.tm_year = strtoul(nmea_safe_tok(NULL), NULL, 10) - 1900;
+
+	tim = timegm(&tm);
+	publish_topic("gps/utc", "%lu", tim);
+}
+
 static void recvd_line(char *line)
 {
 	char *tok;
@@ -247,6 +265,8 @@ static void recvd_line(char *line)
 
 	if (!strcmp(tok+2, "GGA"))
 		recvd_gga();
+	else if (!strcmp(tok+2, "ZDA"))
+		recvd_zda();
 }
 
 static char *lines;

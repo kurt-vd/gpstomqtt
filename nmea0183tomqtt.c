@@ -196,6 +196,43 @@ static int nmea_is_valid_sentence(char *line)
 	return -1;
 }
 
+static void recvd_gga(void)
+{
+	double dval;
+	int ival;
+
+	/* omit UTC within day */
+	nmea_tok(NULL);
+	/* latt */
+	dval = nmea_deg_to_double(nmea_safe_tok(NULL));
+	/* lat sign */
+	if (*nmea_safe_tok(NULL) == 'S')
+		dval *= -1;
+	publish_topic("gps/lat", "%.7lf", dval);
+	/* lon */
+	dval = nmea_deg_to_double(nmea_safe_tok(NULL));
+	/* lon sign */
+	if (*nmea_safe_tok(NULL) == 'W')
+		dval *= -1;
+	publish_topic("gps/lon", "%.7lf", dval);
+	/* fix */
+	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
+	publish_topic("gps/fix", "%s", fromtable(strfix, ival) ?: "");
+	/* satvis */
+	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
+	publish_topic("gps/satvis", "%i", ival);
+	/* unknown */
+	nmea_tok(NULL);
+	/* altitude */
+	dval = nmea_strtod(nmea_safe_tok(NULL));
+	publish_topic("gps/alt", "%.7lf", dval);
+	/* unknown */
+	nmea_tok(NULL);
+	/* geoidal seperation */
+	dval = nmea_strtod(nmea_safe_tok(NULL));
+	publish_topic("gps/geoid", "%.7lf", dval);
+}
+
 static void recvd_line(char *line)
 {
 	char *tok;
@@ -207,6 +244,9 @@ static void recvd_line(char *line)
 			strncmp(tok, "LC", 2))
 		/* bad line ? */
 		return;
+
+	if (!strcmp(tok+2, "GGA"))
+		recvd_gga();
 }
 
 static char *lines;

@@ -251,6 +251,20 @@ static void recvd_gsa(void)
 	publish_topic("gps/vdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
 }
 
+static void recvd_vtg(void)
+{
+	int j;
+
+	/* true heading */
+	publish_topic("gps/heading", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
+	nmea_tok(NULL);
+	/* magnetic heading */
+	publish_topic("gps/heading/magnetic", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
+	for (j = 4; j < 7; ++j)
+		nmea_tok(NULL);
+	publish_topic("gps/speed", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
+}
+
 static void recvd_zda(void)
 {
 	int val;
@@ -289,6 +303,8 @@ static void recvd_line(char *line)
 		recvd_gga();
 	else if (!strcmp(tok+2, "GSA"))
 		recvd_gsa();
+	else if (!strcmp(tok+2, "VTG"))
+		recvd_vtg();
 	else if (!strcmp(tok+2, "ZDA"))
 		recvd_zda();
 }

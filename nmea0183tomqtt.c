@@ -233,6 +233,24 @@ static void recvd_gga(void)
 	publish_topic("gps/geoid", "%.7lf", dval);
 }
 
+static void recvd_gsa(void)
+{
+	int j, ival;
+
+	/* selection mode */
+	nmea_tok(NULL);
+	/* gps mode (no fix, 2D, 3D) */
+	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
+	publish_topic("gps/mode", "%s", fromtable(strmode, ival) ?: "");
+	/* consume 12 satellites */
+	for (j = 0; j < 12; ++j)
+		nmea_tok(NULL);
+	/* pdop, ... */
+	publish_topic("gps/pdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("gps/hdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("gps/vdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+}
+
 static void recvd_zda(void)
 {
 	int val;
@@ -269,6 +287,8 @@ static void recvd_line(char *line)
 
 	if (!strcmp(tok+2, "GGA"))
 		recvd_gga();
+	else if (!strcmp(tok+2, "GSA"))
+		recvd_gsa();
 	else if (!strcmp(tok+2, "ZDA"))
 		recvd_zda();
 }

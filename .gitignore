@@ -1,0 +1,10 @@
+# output
+*.o
+nmea0183tomqtt
+
+# environment
+tags
+config.mk
+
+# test files
+*.nmea

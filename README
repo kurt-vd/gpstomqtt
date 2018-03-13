@@ -1,0 +1,22 @@
+# nmea0183tomqtt
+
+nmea0183tomqtt will take input a serial port,
+and forward it's output into (fixed topics in) MQTT.
+
+## cross compiling
+
+(Cross-)compiling is performed without using autotools!
+
+Locally modifying the build can be done by creating
+a config.mk file, which allows to tune some variables
+from the Makefile.
+
+The modifications of config.mk are hidden from git,
+they are supposed to be trivial.
+
+Since creating such config.mk file from scratch
+may be hard, some examples are provided.
+You can start with copying any of those to config.mk
+
+config.mk-arm:
+	This cross-compiles on linux (posix) for arm.

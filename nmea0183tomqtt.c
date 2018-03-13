@@ -119,8 +119,32 @@ static void my_exit(void)
 		mosquitto_disconnect(mosq);
 }
 
+/* MQTT API */
+static char *myuuid;
+static const char selfsynctopic[] = "tmp/selfsync";
+static void send_self_sync(struct mosquitto *mosq)
+{
+	int ret;
+
+	asprintf(&myuuid, "%i-%li-%i", getpid(), time(NULL), rand());
+
+	ret = mosquitto_subscribe(mosq, NULL, selfsynctopic, mqtt_qos);
+	if (ret)
+		mylog(LOG_ERR, "mosquitto_subscribe %s: %s", selfsynctopic, mosquitto_strerror(ret));
+	ret = mosquitto_publish(mosq, NULL, selfsynctopic, strlen(myuuid), myuuid, mqtt_qos, 0);
+	if (ret < 0)
+		mylog(LOG_ERR, "mosquitto_publish %s: %s", selfsynctopic, mosquitto_strerror(ret));
+}
+static int is_self_sync(const struct mosquitto_message *msg)
+{
+	return !strcmp(msg->topic, selfsynctopic) &&
+		!strcmp(myuuid ?: "", msg->payload ?: "");
+}
+
 static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitto_message *msg)
 {
+	if (is_self_sync(msg))
+		ready = 1;
 }
 
 static void publish_topic(const char *topic, const char *vfmt, ...)
@@ -466,6 +490,14 @@ int main(int argc, char *argv[])
 			if (ret)
 				mylog(LOG_ERR, "mosquitto_loop_write: %s", mosquitto_strerror(ret));
 		}
+	}
+
+	/* terminate */
+	send_self_sync(mosq);
+	while (!ready) {
+		ret = mosquitto_loop(mosq, 10, 1);
+		if (ret < 0)
+			mylog(LOG_ERR, "mosquitto_loop: %s", mosquitto_strerror(ret));
 	}
 
 	return 0;

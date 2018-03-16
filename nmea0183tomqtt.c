@@ -351,6 +351,9 @@ static void recvd_line(char *line)
 {
 	char *tok;
 
+	if (!*line)
+		/* empty line */
+		return;
 	if (nmea_is_valid_sentence(line) < 0)
 		return;
 	tok = nmea_tok(line);

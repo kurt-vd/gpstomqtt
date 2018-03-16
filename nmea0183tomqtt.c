@@ -121,6 +121,13 @@ static const char *const strmode[] = {
 #define fromtable(table, idx)	(((idx) >= sizeof(table)/sizeof((table)[0])) ? NULL : (table)[idx])
 
 /* signalling */
+static int mysignal(int signr, void (*fn)(int))
+{
+	struct sigaction sa = {
+		.sa_handler = fn,
+	};
+	return sigaction(signr, &sa, NULL);
+}
 static void onsigterm(int signr)
 {
 	sigterm = 1;
@@ -451,8 +458,8 @@ int main(int argc, char *argv[])
 	}
 
 	atexit(my_exit);
-	signal(SIGINT, onsigterm);
-	signal(SIGTERM, onsigterm);
+	mysignal(SIGINT, onsigterm);
+	mysignal(SIGTERM, onsigterm);
 	openlog(NAME, LOG_PERROR, LOG_LOCAL2);
 	setlogmask(logmask);
 

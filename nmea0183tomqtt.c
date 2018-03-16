@@ -57,6 +57,13 @@ static const char help_msg[] =
 	" -V, --version		Show version\n"
 	" -v, --verbose		Be more verbose\n"
 	" -h, --host=HOST[:PORT]Specify alternate MQTT host+port\n"
+	" -n, --nmea=GGA[,ZDA...]	Specify what message to forward\n"
+	"		Possible messages are:\n"
+	"		* GGA	: lon, lat, alt, hdop, quality\n"
+	"		* GSA	: DOP & active satellites\n"
+	"		* VTG	: Speed & heading\n"
+	"		* ZDA	: GPS time\n"
+	"		Default: GGA,ZDA,VTG\n"
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
@@ -69,6 +76,7 @@ static struct option long_opts[] = {
 	{ "verbose", no_argument, NULL, 'v', },
 
 	{ "host", required_argument, NULL, 'h', },
+	{ "nmea", required_argument, NULL, 'n', },
 
 	{ },
 };
@@ -76,7 +84,7 @@ static struct option long_opts[] = {
 #define getopt_long(argc, argv, optstring, longopts, longindex) \
 	getopt((argc), (argv), (optstring))
 #endif
-static const char optstring[] = "Vv?h:";
+static const char optstring[] = "Vv?h:n:";
 
 /* signal handler */
 static volatile int sigterm;
@@ -91,6 +99,7 @@ static int mqtt_qos = -1;
 /* state */
 static struct mosquitto *mosq;
 
+static const char *nmea_use = "gga,zda,vtg";
 /* nmea tables */
 static const char *const strfix[] = {
 	[0] = "none",
@@ -264,8 +273,11 @@ static void recvd_gga(void)
 	publish_topic("gps/fix", "%s", fromtable(strfix, ival) ?: "");
 	/* satvis */
 	publish_topic("gps/satvis", "%i", strtoul(nmea_safe_tok(NULL), NULL, 0));
-	/* unknown */
-	nmea_tok(NULL);
+	/* hdop */
+	dval = nmea_strtod(nmea_safe_tok(NULL));
+	if (!strcasestr(nmea_use, "GSA"))
+		/* publish hdop from GGA only if GSA is not used */
+		publish_topic("gps/hdop", "%.1lf", dval);
 	/* altitude */
 	publish_topic("gps/alt", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
 	/* unknown */
@@ -340,7 +352,10 @@ static void recvd_line(char *line)
 		return;
 	/* don't test the precise talker id */
 
-	if (!strcmp(tok+2, "GGA"))
+	if (!strcasestr(nmea_use, tok+2))
+		/* this sentence is blocked */
+		return;
+	else if (!strcmp(tok+2, "GGA"))
 		recvd_gga();
 	else if (!strcmp(tok+2, "GSA"))
 		recvd_gsa();
@@ -422,6 +437,9 @@ int main(int argc, char *argv[])
 			*str = 0;
 			mqtt_port = strtoul(str+1, NULL, 10);
 		}
+		break;
+	case 'n':
+		nmea_use = optarg;
 		break;
 
 	default:

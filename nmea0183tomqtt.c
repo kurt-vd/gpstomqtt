@@ -101,7 +101,7 @@ static struct mosquitto *mosq;
 
 static const char *nmea_use = "gga,zda,vtg";
 /* nmea tables */
-static const char *const strfix[] = {
+static const char *const strquality[] = {
 	[0] = "none",
 	[1] = "gps",
 	[2] = "dgps",
@@ -270,7 +270,7 @@ static void recvd_gga(void)
 	publish_topic("gps/lon", "%.7lf", dval);
 	/* fix */
 	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
-	publish_topic("gps/fix", "%s", fromtable(strfix, ival) ?: "");
+	publish_topic("gps/quality", "%s", fromtable(strquality, ival) ?: "");
 	/* satvis */
 	publish_topic("gps/satvis", "%i", strtoul(nmea_safe_tok(NULL), NULL, 0));
 	/* hdop */

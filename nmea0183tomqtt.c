@@ -158,7 +158,7 @@ static void send_self_sync(struct mosquitto *mosq)
 static int is_self_sync(const struct mosquitto_message *msg)
 {
 	return !strcmp(msg->topic, selfsynctopic) &&
-		!strcmp(myuuid ?: "", msg->payload ?: "");
+		!strncmp(myuuid ?: "", msg->payload ?: "", msg->payloadlen);
 }
 
 static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitto_message *msg)

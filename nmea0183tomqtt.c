@@ -276,10 +276,10 @@ static void recvd_gga(void)
 		dval *= -1;
 	publish_topic("gps/lon", "%.7lf", dval);
 	/* fix */
-	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
+	ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	publish_topic("gps/quality", "%s", fromtable(strquality, ival) ?: "");
 	/* satvis */
-	publish_topic("gps/satvis", "%i", strtoul(nmea_safe_tok(NULL), NULL, 0));
+	publish_topic("gps/satvis", "%i", strtoul(nmea_safe_tok(NULL), NULL, 10));
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
 	if (!strcasestr(nmea_use, "GSA"))
@@ -300,7 +300,7 @@ static void recvd_gsa(void)
 	/* selection mode */
 	nmea_tok(NULL);
 	/* gps mode (no fix, 2D, 3D) */
-	ival = strtoul(nmea_safe_tok(NULL), NULL, 0);
+	ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	publish_topic("gps/mode", "%s", fromtable(strmode, ival) ?: "");
 	/* consume 12 satellites */
 	for (j = 0; j < 12; ++j)

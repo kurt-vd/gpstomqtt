@@ -59,10 +59,11 @@ static const char help_msg[] =
 	" -h, --host=HOST[:PORT]Specify alternate MQTT host+port\n"
 	" -n, --nmea=GGA[,ZDA...]	Specify what message to forward\n"
 	"		Possible messages are:\n"
-	"		* GGA	: lon, lat, alt, hdop, quality\n"
-	"		* GSA	: DOP & active satellites\n"
-	"		* VTG	: Speed & heading\n"
-	"		* ZDA	: GPS time\n"
+	"		*GGA	lon, lat, alt, hdop, quality\n"
+	"		 GSA	DOP & active satellites\n"
+	"		 GSV	Satellites in view info\n"
+	"		*VTG	Speed & heading\n"
+	"		*ZDA	GPS time\n"
 	"		Default: GGA,ZDA,VTG\n"
 	"\n"
 	"Arguments\n"
@@ -313,6 +314,43 @@ static void recvd_gsa(void)
 	publish_topic("gps/vdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
 }
 
+static void recvd_gsv(void)
+{
+	__attribute__((unused))
+	int isent, nsent;
+	int prn, elv, azm, snr;
+	int j;
+	char *tok;
+	static char topic[128];
+
+	nsent = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	isent = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	nmea_tok(NULL); /* #sats in view */
+	for (j = 0; j < 4; ++j) {
+		tok = nmea_safe_tok(NULL);
+		if (!strlen(tok))
+			break;
+		prn = strtoul(tok, NULL, 10);
+		elv = strtoul(nmea_safe_tok(NULL), NULL, 10);
+		azm = strtoul(nmea_safe_tok(NULL), NULL, 10);
+		snr = strtoul(nmea_safe_tok(NULL), NULL, 10);
+
+		/* publish satellite info non-retained.
+		 * retained messages should be cleaned up,
+		 * which implies that we must listen to our own sat info
+		 * an remove 'lost' satellites ...
+		 */
+		sprintf(topic, "gps/sat/%i/elv", prn);
+		publish_topicr(topic, 0, "%i", elv);
+
+		sprintf(topic, "gps/sat/%i/azm", prn);
+		publish_topicr(topic, 0, "%i", azm);
+
+		sprintf(topic, "gps/sat/%i/snr", prn);
+		publish_topicr(topic, 0, "%i", snr);
+	}
+}
+
 static void recvd_vtg(void)
 {
 	int j;
@@ -371,6 +409,8 @@ static void recvd_line(char *line)
 		recvd_gga();
 	else if (!strcmp(tok+2, "GSA"))
 		recvd_gsa();
+	else if (!strcmp(tok+2, "GSV"))
+		recvd_gsv();
 	else if (!strcmp(tok+2, "VTG"))
 		recvd_vtg();
 	else if (!strcmp(tok+2, "ZDA"))

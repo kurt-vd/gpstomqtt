@@ -287,7 +287,7 @@ static void recvd_gga(void)
 	ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	publish_topic("gps/quality", "%s", fromtable(strquality, ival) ?: "");
 	/* satvis */
-	publish_topic("gps/satvis", "%i", strtoul(nmea_safe_tok(NULL), NULL, 10));
+	publish_topic("gps/satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
 	if (!strcasestr(nmea_use, "GSA"))

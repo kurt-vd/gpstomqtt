@@ -167,7 +167,9 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 		ready = 1;
 }
 
-static void publish_topic(const char *topic, const char *vfmt, ...)
+#define publish_topic(topic, vfmt, ...) publish_topicr((topic), 1, (vfmt), ##__VA_ARGS__)
+__attribute__((format(printf,3,4)))
+static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 {
 	va_list va;
 	int ret;
@@ -181,7 +183,7 @@ static void publish_topic(const char *topic, const char *vfmt, ...)
 		strcpy(value, "");
 
 	/* publish cache */
-	ret = mosquitto_publish(mosq, NULL, topic, strlen(value), value, mqtt_qos, 1);
+	ret = mosquitto_publish(mosq, NULL, topic, strlen(value), value, mqtt_qos, retain);
 	if (ret < 0)
 		mylog(LOG_ERR, "mosquitto_publish %s: %s", topic, mosquitto_strerror(ret));
 }

@@ -65,6 +65,7 @@ static const char help_msg[] =
 	"		*VTG	Speed & heading\n"
 	"		*ZDA	GPS time\n"
 	"		Default: GGA,ZDA,VTG\n"
+	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash\n"
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
@@ -78,6 +79,7 @@ static struct option long_opts[] = {
 
 	{ "host", required_argument, NULL, 'h', },
 	{ "nmea", required_argument, NULL, 'n', },
+	{ "prefix", required_argument, NULL, 'p', },
 
 	{ },
 };
@@ -85,7 +87,7 @@ static struct option long_opts[] = {
 #define getopt_long(argc, argv, optstring, longopts, longindex) \
 	getopt((argc), (argv), (optstring))
 #endif
-static const char optstring[] = "Vv?h:n:";
+static const char optstring[] = "Vv?h:n:p:";
 
 /* signal handler */
 static volatile int sigterm;
@@ -101,6 +103,7 @@ static int mqtt_qos = -1;
 static struct mosquitto *mosq;
 
 static const char *nmea_use = "gga,zda,vtg";
+static const char *topicprefix = "";
 /* nmea tables */
 static const char *const strquality[] = {
 	[0] = "none",
@@ -175,6 +178,7 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 	va_list va;
 	int ret;
 	static char value[1024];
+	static char realtopic[1024];
 
 	va_start(va, vfmt);
 	vsprintf(value, vfmt, va);
@@ -183,10 +187,11 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 	if (!strcmp(value, "nan"))
 		strcpy(value, "");
 
+	sprintf(realtopic, "%s%s", topicprefix, topic);
 	/* publish cache */
-	ret = mosquitto_publish(mosq, NULL, topic, strlen(value), value, mqtt_qos, retain);
+	ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
 	if (ret < 0)
-		mylog(LOG_ERR, "mosquitto_publish %s: %s", topic, mosquitto_strerror(ret));
+		mylog(LOG_ERR, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
 }
 
 /* nmea parser */
@@ -492,6 +497,9 @@ int main(int argc, char *argv[])
 		break;
 	case 'n':
 		nmea_use = optarg;
+		break;
+	case 'p':
+		topicprefix = optarg;
 		break;
 
 	default:

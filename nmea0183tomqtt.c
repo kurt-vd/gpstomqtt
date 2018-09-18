@@ -65,7 +65,7 @@ static const char help_msg[] =
 	"		*VTG	Speed & heading\n"
 	"		*ZDA	GPS time\n"
 	"		Default: GGA,ZDA,VTG\n"
-	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash\n"
+	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash, default to 'gps/'\n"
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
@@ -103,7 +103,8 @@ static int mqtt_qos = -1;
 static struct mosquitto *mosq;
 
 static const char *nmea_use = "gga,zda,vtg";
-static const char *topicprefix = "";
+static const char *topicprefix = "gps/";
+
 /* nmea tables */
 static const char *const strquality[] = {
 	[0] = "none",
@@ -276,29 +277,29 @@ static void recvd_gga(void)
 	/* lat sign */
 	if (*nmea_safe_tok(NULL) == 'S')
 		dval *= -1;
-	publish_topic("gps/lat", "%.7lf", dval);
+	publish_topic("lat", "%.7lf", dval);
 	/* lon */
 	dval = nmea_deg_to_double(nmea_safe_tok(NULL));
 	/* lon sign */
 	if (*nmea_safe_tok(NULL) == 'W')
 		dval *= -1;
-	publish_topic("gps/lon", "%.7lf", dval);
+	publish_topic("lon", "%.7lf", dval);
 	/* fix */
 	ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	publish_topic("gps/quality", "%s", fromtable(strquality, ival) ?: "");
+	publish_topic("quality", "%s", fromtable(strquality, ival) ?: "");
 	/* satvis */
-	publish_topic("gps/satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
+	publish_topic("satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
 	if (!strcasestr(nmea_use, "GSA"))
 		/* publish hdop from GGA only if GSA is not used */
-		publish_topic("gps/hdop", "%.1lf", dval);
+		publish_topic("hdop", "%.1lf", dval);
 	/* altitude */
-	publish_topic("gps/alt", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("alt", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
 	/* unknown */
 	nmea_tok(NULL);
 	/* geoidal seperation */
-	publish_topic("gps/geoid", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("geoid", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
 }
 
 static void recvd_gsa(void)
@@ -309,14 +310,14 @@ static void recvd_gsa(void)
 	nmea_tok(NULL);
 	/* gps mode (no fix, 2D, 3D) */
 	ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	publish_topic("gps/mode", "%s", fromtable(strmode, ival) ?: "");
+	publish_topic("mode", "%s", fromtable(strmode, ival) ?: "");
 	/* consume 12 satellites */
 	for (j = 0; j < 12; ++j)
 		nmea_tok(NULL);
 	/* pdop, ... */
-	publish_topic("gps/pdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
-	publish_topic("gps/hdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
-	publish_topic("gps/vdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("pdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("hdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("vdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
 }
 
 static void recvd_gsv(void)
@@ -345,13 +346,13 @@ static void recvd_gsv(void)
 		 * which implies that we must listen to our own sat info
 		 * an remove 'lost' satellites ...
 		 */
-		sprintf(topic, "gps/sat/%i/elv", prn);
+		sprintf(topic, "sat/%i/elv", prn);
 		publish_topicr(topic, 0, "%i", elv);
 
-		sprintf(topic, "gps/sat/%i/azm", prn);
+		sprintf(topic, "sat/%i/azm", prn);
 		publish_topicr(topic, 0, "%i", azm);
 
-		sprintf(topic, "gps/sat/%i/snr", prn);
+		sprintf(topic, "sat/%i/snr", prn);
 		publish_topicr(topic, 0, "%i", snr);
 	}
 }
@@ -361,13 +362,13 @@ static void recvd_vtg(void)
 	int j;
 
 	/* true heading */
-	publish_topic("gps/heading", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("heading", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
 	nmea_tok(NULL);
 	/* magnetic heading */
-	publish_topic("gps/heading/magnetic", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("heading/magnetic", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
 	for (j = 4; j < 7; ++j)
 		nmea_tok(NULL);
-	publish_topic("gps/speed", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("speed", "%.2lf", nmea_strtod(nmea_safe_tok(NULL)));
 }
 
 static void recvd_zda(void)
@@ -385,11 +386,11 @@ static void recvd_zda(void)
 	tm.tm_year = strtoul(nmea_safe_tok(NULL), NULL, 10) - 1900;
 
 	tim = timegm(&tm);
-	publish_topic("gps/utc", "%lu", tim);
+	publish_topic("utc", "%lu", tim);
 
 	static char tstr[128];
 	strftime(tstr, sizeof(tstr), "%a %d %b %Y %H:%M:%S", localtime(&tim));
-	publish_topic("gps/datetime", "%s", tstr);
+	publish_topic("datetime", "%s", tstr);
 }
 
 static void recvd_line(char *line)

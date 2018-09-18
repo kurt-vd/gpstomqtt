@@ -105,6 +105,8 @@ static struct mosquitto *mosq;
 static const char *nmea_use = "gga,zda,vtg";
 static const char *topicprefix = "gps/";
 
+static char talker[3] = {};
+
 /* nmea tables */
 static const char *const strquality[] = {
 	[0] = "none",
@@ -407,6 +409,7 @@ static void recvd_line(char *line)
 		/* bad line ? */
 		return;
 	/* don't test the precise talker id */
+	memcpy(talker, tok, 2);
 
 	if (!strcasestr(nmea_use, tok+2))
 		/* this sentence is blocked */

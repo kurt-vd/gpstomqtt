@@ -65,6 +65,12 @@ static const char help_msg[] =
 	"		*VTG	Speed & heading\n"
 	"		*ZDA	GPS time\n"
 	"		Default: GGA,ZDA,VTG\n"
+	" -a, --always		Publish everything on reception, always\n"
+	"			By default, publish topics only when something changed in the same block\n"
+	"			This holds the program from publishing until something really changed\n"
+	"			Upon change, all topics in that NMEA0183 sentence are published\n"
+	"			to yield a coherent dataset\n"
+	"			Adding -a may produce a lot of equal noise\n"
 	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash, default to 'gps/'\n"
 	"\n"
 	"Arguments\n"
@@ -80,6 +86,7 @@ static struct option long_opts[] = {
 	{ "host", required_argument, NULL, 'h', },
 	{ "nmea", required_argument, NULL, 'n', },
 	{ "prefix", required_argument, NULL, 'p', },
+	{ "always", no_argument, NULL, 'a', },
 
 	{ },
 };
@@ -87,7 +94,7 @@ static struct option long_opts[] = {
 #define getopt_long(argc, argv, optstring, longopts, longindex) \
 	getopt((argc), (argv), (optstring))
 #endif
-static const char optstring[] = "Vv?h:n:p:";
+static const char optstring[] = "Vv?h:n:p:a";
 
 /* signal handler */
 static volatile int sigterm;
@@ -104,6 +111,7 @@ static struct mosquitto *mosq;
 
 static const char *nmea_use = "gga,zda,vtg";
 static const char *topicprefix = "gps/";
+static int always;
 
 static char talker[3] = {};
 
@@ -174,6 +182,18 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 		ready = 1;
 }
 
+/* cache per NMEA message */
+struct topic {
+	struct topic *next;
+	int written;
+	int retain;
+	char *topic;
+	char *payload;
+};
+
+static struct topic *topics, *lasttopic;
+static int ndirty;
+
 #define publish_topic(topic, vfmt, ...) publish_topicr((topic), 1, (vfmt), ##__VA_ARGS__)
 __attribute__((format(printf,3,4)))
 static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
@@ -182,6 +202,7 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 	int ret;
 	static char value[1024];
 	static char realtopic[1024];
+	struct topic *it;
 
 	va_start(va, vfmt);
 	vsprintf(value, vfmt, va);
@@ -191,10 +212,58 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 		strcpy(value, "");
 
 	sprintf(realtopic, "%s%s", topicprefix, topic);
-	/* publish cache */
-	ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
-	if (ret < 0)
-		mylog(LOG_ERR, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
+
+	if (always || !retain) {
+		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
+		if (ret < 0)
+			mylog(LOG_ERR, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
+		return;
+	}
+
+	for (it = topics; it; it = it->next) {
+		if (!strcmp(it->topic, realtopic))
+			break;
+	}
+	if (!it) {
+		it = malloc(sizeof(*it));
+		if (!it)
+			mylog(LOG_ERR, "malloc failed: %s", ESTR(errno));
+		memset(it, 0, sizeof(*it));
+		/* append to linked list */
+		if (!topics) {
+			topics = lasttopic = it;
+		} else {
+			lasttopic->next = it;
+			lasttopic = it;
+		}
+		it->topic = strdup(realtopic);
+		/* save 'retain' only once */
+		it->retain = retain;
+	}
+	it->written = 1;
+	if (strcmp(it->payload ?: "", value)) {
+		if (it->payload)
+			free(it->payload);
+		it->payload = strdup(value);
+		++ndirty;
+	}
+}
+
+static void flush_pending_topics(void)
+{
+	struct topic *it;
+	int ret;
+
+	for (it = topics; it; it = it->next) {
+		/* publish cache */
+		if (it->written && ndirty) {
+			ret = mosquitto_publish(mosq, NULL, it->topic, strlen(it->payload ?: ""), it->payload, mqtt_qos, it->retain);
+			if (ret < 0)
+				mylog(LOG_ERR, "mosquitto_publish %s: %s", it->topic, mosquitto_strerror(ret));
+		}
+		it->written = 0;
+	}
+	ndirty = 0;
 }
 
 /* nmea parser */
@@ -297,11 +366,11 @@ static void recvd_gga(void)
 		/* publish hdop from GGA only if GSA is not used */
 		publish_topic("hdop", "%.1lf", dval);
 	/* altitude */
-	publish_topic("alt", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("alt", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
 	/* unknown */
 	nmea_tok(NULL);
 	/* geoidal seperation */
-	publish_topic("geoid", "%.7lf", nmea_strtod(nmea_safe_tok(NULL)));
+	publish_topic("geoid", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
 }
 
 static void recvd_gsa(void)
@@ -424,6 +493,7 @@ static void recvd_line(char *line)
 		recvd_vtg();
 	else if (!strcmp(tok+2, "ZDA"))
 		recvd_zda();
+	flush_pending_topics();
 }
 
 static char *lines;
@@ -504,6 +574,9 @@ int main(int argc, char *argv[])
 		break;
 	case 'p':
 		topicprefix = optarg;
+		break;
+	case 'a':
+		always = 1;
 		break;
 
 	default:

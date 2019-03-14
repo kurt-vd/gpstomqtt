@@ -73,6 +73,7 @@ static const char help_msg[] =
 	"			to yield a coherent dataset\n"
 	"			Adding -a may produce a lot of equal noise\n"
 	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash, default to 'gps/'\n"
+	" -D, --deadtime=DELAY	Consider port dead after DELAY seconds of silence (default 10)\n"
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
@@ -88,6 +89,7 @@ static struct option long_opts[] = {
 	{ "nmea", required_argument, NULL, 'n', },
 	{ "prefix", required_argument, NULL, 'p', },
 	{ "always", no_argument, NULL, 'a', },
+	{ "deadtime", required_argument, NULL, 'd', },
 
 	{ },
 };
@@ -95,10 +97,11 @@ static struct option long_opts[] = {
 #define getopt_long(argc, argv, optstring, longopts, longindex) \
 	getopt((argc), (argv), (optstring))
 #endif
-static const char optstring[] = "Vv?h:n:p:a";
+static const char optstring[] = "Vv?h:n:p:ad:";
 
 /* signal handler */
 static volatile int sigterm;
+static volatile int sigalrm;
 static volatile int ready;
 
 /* MQTT parameters */
@@ -113,6 +116,8 @@ static struct mosquitto *mosq;
 static const char *nmea_use = "gga,zda,vtg";
 static const char *topicprefix = "gps/";
 static int always;
+static int deaddelay = 10;
+static int portalive = -1;
 
 static char talker[3] = {};
 
@@ -566,6 +571,9 @@ int main(int argc, char *argv[])
 	case 'a':
 		always = 1;
 		break;
+	case 'd':
+		deaddelay = strtoul(optarg, NULL, 0);
+		break;
 
 	default:
 		fprintf(stderr, "unknown option '%c'", opt);
@@ -630,6 +638,8 @@ int main(int argc, char *argv[])
 	pf[2].events = POLL_IN;
 
 	static char line[1024];
+	/* schedule dead alarm */
+	alarm(deaddelay);
 	while (!sigterm) {
 		ret = poll(pf, 3, 1000);
 		if (ret < 0)
@@ -639,8 +649,16 @@ int main(int argc, char *argv[])
 			ret = read(STDIN_FILENO, line, sizeof(line)-1);
 			if (ret < 0)
 				mylog(LOG_ERR, "read stdin: %s", ESTR(errno));
+			/* schedule dead alarm */
+			alarm(deaddelay);
 			if (!ret)
 				break;
+			if (portalive < 1) {
+				publish_topic("alive", "1");
+				flush_pending_topics();
+				portalive = 1;
+			}
+
 			line[ret] = 0;
 			recvd_lines(line);
 		}
@@ -660,6 +678,15 @@ int main(int argc, char *argv[])
 			case SIGTERM:
 			case SIGINT:
 				sigterm = 1;
+				break;
+			case SIGALRM:
+				if (portalive != 0) {
+					publish_topic("alive", "0");
+					flush_pending_topics();
+					portalive = 0;
+				}
+				/* schedule next */
+				alarm(deaddelay);
 				break;
 			}
 		}

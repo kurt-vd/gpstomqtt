@@ -647,6 +647,9 @@ int main(int argc, char *argv[])
 		if (pf[0].revents) {
 			/* read input events */
 			ret = read(STDIN_FILENO, line, sizeof(line)-1);
+			if (ret < 0 && errno == EAGAIN)
+				/* another reader snooped our data away */
+				goto gps_done;
 			if (ret < 0)
 				mylog(LOG_ERR, "read stdin: %s", ESTR(errno));
 			/* schedule dead alarm */
@@ -662,6 +665,7 @@ int main(int argc, char *argv[])
 			line[ret] = 0;
 			recvd_lines(line);
 		}
+gps_done:
 		if (pf[1].revents) {
 			/* mqtt read ... */
 			ret = mosquitto_loop_read(mosq, 1);

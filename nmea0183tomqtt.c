@@ -33,6 +33,7 @@
 #include <poll.h>
 #include <syslog.h>
 #include <mosquitto.h>
+#include <sys/signalfd.h>
 
 #define NAME "nmea0183tomqtt"
 #ifndef VERSION
@@ -134,19 +135,6 @@ static const char *const strmode[] = {
 };
 
 #define fromtable(table, idx)	(((idx) >= sizeof(table)/sizeof((table)[0])) ? NULL : (table)[idx])
-
-/* signalling */
-static int mysignal(int signr, void (*fn)(int))
-{
-	struct sigaction sa = {
-		.sa_handler = fn,
-	};
-	return sigaction(signr, &sa, NULL);
-}
-static void onsigterm(int signr)
-{
-	sigterm = 1;
-}
 
 static void my_exit(void)
 {
@@ -540,7 +528,7 @@ int main(int argc, char *argv[])
 	char *str;
 	char mqtt_name[32];
 	int logmask = LOG_UPTO(LOG_NOTICE);
-	struct pollfd pf[2];
+	struct pollfd pf[3];
 
 	setlocale(LC_ALL, "");
 	/* argument parsing */
@@ -588,9 +576,6 @@ int main(int argc, char *argv[])
 	}
 
 	atexit(my_exit);
-	mysignal(SIGINT, onsigterm);
-	mysignal(SIGTERM, onsigterm);
-	openlog(NAME, LOG_PERROR, LOG_LOCAL2);
 	setlogmask(logmask);
 
 	if (optind < argc) {
@@ -622,17 +607,31 @@ int main(int argc, char *argv[])
 		mylog(LOG_ERR, "mosquitto_connect %s:%i: %s", mqtt_host, mqtt_port, mosquitto_strerror(ret));
 	mosquitto_message_callback_set(mosq, my_mqtt_msg);
 
+	/* prepare signalfd */
+	struct signalfd_siginfo sfdi;
+	sigset_t sigmask;
+	int sigfd;
+
+	sigemptyset(&sigmask);
+	sigfillset(&sigmask);
+
+	if (sigprocmask(SIG_BLOCK, &sigmask, NULL) < 0)
+		mylog(LOG_ERR, "sigprocmask: %s", ESTR(errno));
+	sigfd = signalfd(-1, &sigmask, SFD_NONBLOCK | SFD_CLOEXEC);
+	if (sigfd < 0)
+		mylog(LOG_ERR, "signalfd failed: %s", ESTR(errno));
+
 	/* prepare poll */
 	pf[0].fd = STDIN_FILENO;
 	pf[0].events = POLL_IN;
 	pf[1].fd = mosquitto_socket(mosq);
 	pf[1].events = POLL_IN;
+	pf[2].fd = sigfd;
+	pf[2].events = POLL_IN;
 
 	static char line[1024];
 	while (!sigterm) {
-		ret = poll(pf, 2, 1000);
-		if (ret < 0 && errno == EINTR)
-			continue;
+		ret = poll(pf, 3, 1000);
 		if (ret < 0)
 			mylog(LOG_ERR, "poll ...");
 		if (pf[0].revents) {
@@ -650,6 +649,19 @@ int main(int argc, char *argv[])
 			ret = mosquitto_loop_read(mosq, 1);
 			if (ret)
 				mylog(LOG_ERR, "mosquitto_loop_read: %s", mosquitto_strerror(ret));
+		}
+		while (pf[2].revents) {
+			ret = read(sigfd, &sfdi, sizeof(sfdi));
+			if (ret < 0 && errno == EAGAIN)
+				break;
+			if (ret < 0)
+				mylog(LOG_ERR, "read signalfd: %s", ESTR(errno));
+			switch (sfdi.ssi_signo) {
+			case SIGTERM:
+			case SIGINT:
+				sigterm = 1;
+				break;
+			}
 		}
 		/* mosquitto things to do each iteration */
 		ret = mosquitto_loop_misc(mosq);

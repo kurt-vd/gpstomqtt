@@ -611,9 +611,10 @@ int main(int argc, char *argv[])
 	atexit(my_exit);
 	setlogmask(logmask);
 
+	char *file;
 	if (optind < argc) {
 		/* extra file|device argument */
-		char *file = argv[optind++];
+		file = argv[optind++];
 		int fd;
 
 		/* open file */
@@ -665,6 +666,8 @@ int main(int argc, char *argv[])
 	static char line[1024];
 	/* schedule dead alarm */
 	alarm(deaddelay);
+
+	publish_topic("src", "%s", file ?: "-");
 	while (!sigterm) {
 		ret = poll(pf, 3, 1000);
 		if (ret < 0)

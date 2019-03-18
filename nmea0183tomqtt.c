@@ -262,6 +262,25 @@ static void flush_pending_topics(void)
 	ndirty = 0;
 }
 
+static void erase_topics(int clrctrl)
+{
+	struct topic *it;
+
+	for (it = topics; it; it = it->next) {
+		if (it->ctrltopic && !clrctrl)
+			continue;
+		if (!it->payload)
+			/* nothting to erase */
+			continue;
+		/* clear cached value, and mark as dirty */
+		free(it->payload);
+		it->payload = NULL;
+		it->written = 1;
+		++ndirty;
+	}
+	flush_pending_topics();
+}
+
 /* nmea parser */
 static char *nmea_tok(char *line)
 {
@@ -692,6 +711,7 @@ gps_done:
 			case SIGALRM:
 				if (portalive != 0) {
 					publish_topic("alive", "0");
+					erase_topics(0);
 					flush_pending_topics();
 					portalive = 0;
 				}
@@ -711,6 +731,7 @@ gps_done:
 		}
 	}
 
+	erase_topics(1);
 	/* terminate */
 	send_self_sync(mosq);
 	while (!ready) {

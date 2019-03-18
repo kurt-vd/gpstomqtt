@@ -180,12 +180,14 @@ struct topic {
 	struct topic *next;
 	int written;
 	int retain;
+	int ctrltopic;
 	char *topic;
 	char *payload;
 };
 
 static struct topic *topics, *lasttopic;
 static int ndirty;
+static int in_data_sentence;
 
 #define publish_topic(topic, vfmt, ...) publish_topicr((topic), 1, (vfmt), ##__VA_ARGS__)
 __attribute__((format(printf,3,4)))
@@ -232,6 +234,7 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 		it->topic = strdup(realtopic);
 		/* save 'retain' only once */
 		it->retain = retain;
+		it->ctrltopic = !in_data_sentence;
 	}
 	it->written = 1;
 	if (strcmp(it->payload ?: "", value)) {
@@ -470,12 +473,13 @@ static void recvd_line(char *line)
 	if (strlen(tok) <= 2)
 		/* bad line ? */
 		return;
+	in_data_sentence = 0;
 	/* don't test the precise talker id */
 	memcpy(talker, tok, 2);
 
 	if (!strcasestr(nmea_use, tok+2))
 		/* this sentence is blocked */
-		return;
+		goto done;
 	else if (!strcmp(tok+2, "GGA"))
 		recvd_gga();
 	else if (!strcmp(tok+2, "GSA"))
@@ -487,6 +491,8 @@ static void recvd_line(char *line)
 	else if (!strcmp(tok+2, "ZDA"))
 		recvd_zda();
 	flush_pending_topics();
+done:
+	in_data_sentence = 0;
 }
 
 static char *lines;

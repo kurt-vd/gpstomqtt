@@ -206,7 +206,7 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 
 	sprintf(realtopic, "%s%s", topicprefix, topic);
 
-	if (always || !retain) {
+	if (!retain) {
 		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
 		if (ret < 0)
 			mylog(LOG_ERR, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
@@ -249,7 +249,7 @@ static void flush_pending_topics(void)
 
 	for (it = topics; it; it = it->next) {
 		/* publish cache */
-		if (it->written && ndirty) {
+		if (it->written && (ndirty || always)) {
 			ret = mosquitto_publish(mosq, NULL, it->topic, strlen(it->payload ?: ""), it->payload, mqtt_qos, it->retain);
 			if (ret < 0)
 				mylog(LOG_ERR, "mosquitto_publish %s: %s", it->topic, mosquitto_strerror(ret));

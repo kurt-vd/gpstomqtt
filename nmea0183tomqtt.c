@@ -80,6 +80,7 @@ static const char help_msg[] =
 	"\n"
 	"Runtime configuration via MQTT\n"
 	" <PREFIX>/cfg/msgs	overrule --nmea parameter (empty value reverts to original)\n"
+	" <PREFIX>/cfg/always	set --always parameter\n"
 	;
 
 #ifdef _GNU_SOURCE
@@ -195,6 +196,10 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 				free(nmea_use_mqtt);
 			nmea_use_mqtt = msg->payloadlen ? strdup((char *)msg->payload) : NULL;
 			mylog(LOG_NOTICE, "nmea msgs overrule to '%s'", nmea_use_mqtt ?: "");
+
+		} else if (!strcmp(stopic, "always")) {
+			always = strtoul((char *)msg->payload ?: "0", NULL, 0);
+			mylog(LOG_NOTICE, "--%s changed to %u", stopic, always);
 		}
 	}
 }

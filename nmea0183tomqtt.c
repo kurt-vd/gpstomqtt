@@ -79,6 +79,7 @@ static const char help_msg[] =
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
 	"\n"
 	"Runtime configuration via MQTT\n"
+	" <PREFIX>/cfg/msgs	overrule --nmea parameter (empty value reverts to original)\n"
 	;
 
 #ifdef _GNU_SOURCE
@@ -116,6 +117,7 @@ static int mqtt_qos = -1;
 static struct mosquitto *mosq;
 
 static const char *nmea_use = "gga,zda,vtg";
+static char *nmea_use_mqtt; /* overrule nmea_use from mqtt */
 static const char *topicprefix = "gps/";
 static int topicprefixlen = 4;
 static int always;
@@ -188,6 +190,12 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 			!strncmp(msg->topic+topicprefixlen, cfgprefix, cfgprefixlen)) {
 		const char *stopic = msg->topic + topicprefixlen + cfgprefixlen;
 
+		if (!strcmp(stopic, "msgs")) {
+			if (nmea_use_mqtt)
+				free(nmea_use_mqtt);
+			nmea_use_mqtt = msg->payloadlen ? strdup((char *)msg->payload) : NULL;
+			mylog(LOG_NOTICE, "nmea msgs overrule to '%s'", nmea_use_mqtt ?: "");
+		}
 	}
 }
 
@@ -392,7 +400,7 @@ static void recvd_gga(void)
 	publish_topic("satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
-	if (!strcasestr(nmea_use, "GSA"))
+	if (!strcasestr(nmea_use_mqtt ?: nmea_use, "GSA"))
 		/* publish hdop from GGA only if GSA is not used */
 		publish_topic("hdop", "%.1lf", dval);
 	/* altitude */
@@ -511,7 +519,7 @@ static void recvd_line(char *line)
 	/* don't test the precise talker id */
 	memcpy(talker, tok, 2);
 
-	if (!strcasestr(nmea_use, tok+2))
+	if (!strcasestr(nmea_use_mqtt ?: nmea_use, tok+2))
 		/* this sentence is blocked */
 		goto done;
 	else if (!strcmp(tok+2, "GGA"))

@@ -77,6 +77,8 @@ static const char help_msg[] =
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
+	"\n"
+	"Runtime configuration via MQTT\n"
 	;
 
 #ifdef _GNU_SOURCE
@@ -115,6 +117,7 @@ static struct mosquitto *mosq;
 
 static const char *nmea_use = "gga,zda,vtg";
 static const char *topicprefix = "gps/";
+static int topicprefixlen = 4;
 static int always;
 static int deaddelay = 10;
 static int portalive = -1;
@@ -147,6 +150,10 @@ static void my_exit(void)
 		mosquitto_disconnect(mosq);
 }
 
+/* forward decl */
+__attribute__((format(printf,3,4)))
+static void publish_topicr(const char *topic, int retain, const char *vfmt, ...);
+
 /* MQTT API */
 static char *myuuid;
 static const char selfsynctopic[] = "tmp/selfsync";
@@ -171,8 +178,17 @@ static int is_self_sync(const struct mosquitto_message *msg)
 
 static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitto_message *msg)
 {
+#define cfgprefix "cfg/"
+#define cfgprefixlen 4
+
 	if (is_self_sync(msg))
 		ready = 1;
+
+	if (!strncmp(msg->topic, topicprefix, topicprefixlen) &&
+			!strncmp(msg->topic+topicprefixlen, cfgprefix, cfgprefixlen)) {
+		const char *stopic = msg->topic + topicprefixlen + cfgprefixlen;
+
+	}
 }
 
 /* cache per NMEA message */
@@ -190,7 +206,6 @@ static int ndirty;
 static int in_data_sentence;
 
 #define publish_topic(topic, vfmt, ...) publish_topicr((topic), 1, (vfmt), ##__VA_ARGS__)
-__attribute__((format(printf,3,4)))
 static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 {
 	va_list va;
@@ -592,6 +607,7 @@ int main(int argc, char *argv[])
 		break;
 	case 'p':
 		topicprefix = optarg;
+		topicprefixlen = strlen(topicprefix);
 		break;
 	case 'a':
 		always = 1;
@@ -640,6 +656,12 @@ int main(int argc, char *argv[])
 	if (ret)
 		mylog(LOG_ERR, "mosquitto_connect %s:%i: %s", mqtt_host, mqtt_port, mosquitto_strerror(ret));
 	mosquitto_message_callback_set(mosq, my_mqtt_msg);
+
+	asprintf(&str, "%s%s#", topicprefix, cfgprefix);
+	ret = mosquitto_subscribe(mosq, NULL, str, mqtt_qos);
+	if (ret)
+		mylog(LOG_ERR, "mosquitto_subscribe %s: %s", str, mosquitto_strerror(ret));
+	free(str);
 
 	/* prepare signalfd */
 	struct signalfd_siginfo sfdi;

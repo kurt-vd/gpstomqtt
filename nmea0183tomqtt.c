@@ -171,7 +171,7 @@ static void send_self_sync(struct mosquitto *mosq)
 	if (ret)
 		mylog(LOG_ERR, "mosquitto_subscribe %s: %s", selfsynctopic, mosquitto_strerror(ret));
 	ret = mosquitto_publish(mosq, NULL, selfsynctopic, strlen(myuuid), myuuid, mqtt_qos, 0);
-	if (ret < 0)
+	if (ret)
 		mylog(LOG_ERR, "mosquitto_publish %s: %s", selfsynctopic, mosquitto_strerror(ret));
 }
 static int is_self_sync(const struct mosquitto_message *msg)
@@ -243,7 +243,7 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 
 	if (!retain) {
 		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
-		if (ret < 0)
+		if (ret)
 			mylog(LOG_ERR, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
 		return;
 	}
@@ -287,7 +287,7 @@ static void flush_pending_topics(void)
 		/* publish cache */
 		if (it->written && (ndirty || always)) {
 			ret = mosquitto_publish(mosq, NULL, it->topic, strlen(it->payload ?: ""), it->payload, mqtt_qos, it->retain);
-			if (ret < 0)
+			if (ret)
 				mylog(LOG_ERR, "mosquitto_publish %s: %s", it->topic, mosquitto_strerror(ret));
 		}
 		it->written = 0;

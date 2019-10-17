@@ -465,13 +465,13 @@ static void recvd_gsv(void)
 		 * which implies that we must listen to our own sat info
 		 * an remove 'lost' satellites ...
 		 */
-		sprintf(topic, "sat/%s:%i/elv", talker, prn);
+		sprintf(topic, "%s/sat/%i/elv", talker, prn);
 		publish_topicr(topic, 0, "%i", elv);
 
-		sprintf(topic, "sat/%s:%i/azm", talker, prn);
+		sprintf(topic, "%s/sat/%i/azm", talker, prn);
 		publish_topicr(topic, 0, "%i", azm);
 
-		sprintf(topic, "sat/%s:%i/snr", talker, prn);
+		sprintf(topic, "%s/sat/%i/snr", talker, prn);
 		publish_topicr(topic, 0, "%i", snr);
 	}
 }

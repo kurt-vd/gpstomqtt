@@ -224,6 +224,7 @@ static int ndirty;
 static int in_data_sentence;
 
 #define publish_topic(topic, vfmt, ...) publish_topicr((topic), 1, (vfmt), ##__VA_ARGS__)
+__attribute__((format(printf,3,4)))
 static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 {
 	va_list va;

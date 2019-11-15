@@ -223,6 +223,18 @@ static struct topic *topics, *lasttopic;
 static int ndirty;
 static int in_data_sentence;
 
+__attribute__((format(printf,1,2)))
+static const char *mktopic(const char *fmt, ...)
+{
+	va_list va;
+	static char topic[1024];
+
+	va_start(va, fmt);
+	vsnprintf(topic, sizeof(topic), fmt, va);
+	va_end(va);
+	return topic;
+}
+
 #define publish_topic(topic, vfmt, ...) publish_topicr((topic), 1, (vfmt), ##__VA_ARGS__)
 __attribute__((format(printf,3,4)))
 static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)

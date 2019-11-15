@@ -438,20 +438,28 @@ static void recvd_gga(void)
 
 static void recvd_gsa(void)
 {
-	int j, ival;
+	int j, ival, pktnr;
+	double pdop, hdop, vdop;
 
 	/* selection mode */
 	nmea_tok(NULL);
 	/* gps mode (no fix, 2D, 3D) */
 	ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	publish_topic("mode", "%s", fromtable(strmode, ival) ?: "");
 	/* consume 12 satellites */
 	for (j = 0; j < 12; ++j)
 		nmea_tok(NULL);
 	/* pdop, ... */
-	publish_topic("pdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
-	publish_topic("hdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
-	publish_topic("vdop", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+	pdop = nmea_strtod(nmea_safe_tok(NULL));
+	hdop = nmea_strtod(nmea_safe_tok(NULL));
+	vdop = nmea_strtod(nmea_safe_tok(NULL));
+
+	pktnr = strtoul(nmea_tok(NULL) ?: "1", NULL, 10);
+	if (pktnr == 1) {
+		publish_topic(mktopic("%s/mode", talker), "%s", fromtable(strmode, ival) ?: "");
+		publish_topic(mktopic("%s/pdop", talker), "%.1lf", pdop);
+		publish_topic(mktopic("%s/hdop", talker), "%.1lf", hdop);
+		publish_topic(mktopic("%s/vdop", talker), "%.1lf", vdop);
+	}
 }
 
 static void recvd_gsv(void)

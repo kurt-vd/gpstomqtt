@@ -340,12 +340,12 @@ static char *nmea_tok(char *line)
 		++line;
 
 	for (str = line; *str; ++str) {
-		if (strchr(",*", *str)) {
+		if (strchr(",", *str)) {
 			*str++ = 0;
-			saved_line = str;
-			return line;
+			break;
 		}
 	}
+	saved_line = str;
 	return *line ? line : NULL;
 }
 static inline char *nmea_safe_tok(char *line)
@@ -382,6 +382,8 @@ static int nmea_is_valid_sentence(char *line)
 	/* make my sum, start after initial $ */
 	for (str = line+1, my_sum = 0; *str; ++str) {
 		if (*str == '*') {
+			/* cut checksum field */
+			*str = 0;
 			/* end of sentence */
 			nmea_sum = strtoul(str+1, NULL, 16);
 			if (my_sum != nmea_sum) {

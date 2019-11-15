@@ -459,7 +459,7 @@ static void recvd_gsv(void)
 	int prn, elv, azm, snr;
 	int j;
 	char *tok;
-	static char topic[128];
+	const char *topic;
 
 	nsent = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	isent = strtoul(nmea_safe_tok(NULL), NULL, 10);
@@ -478,13 +478,13 @@ static void recvd_gsv(void)
 		 * which implies that we must listen to our own sat info
 		 * an remove 'lost' satellites ...
 		 */
-		sprintf(topic, "%s/sat/%i/elv", talker, prn);
+		topic = mktopic("%s/sat/%i/elv", talker, prn);
 		publish_topicr(topic, 0, "%i", elv);
 
-		sprintf(topic, "%s/sat/%i/azm", talker, prn);
+		topic = mktopic("%s/sat/%i/azm", talker, prn);
 		publish_topicr(topic, 0, "%i", azm);
 
-		sprintf(topic, "%s/sat/%i/snr", talker, prn);
+		topic = mktopic("%s/sat/%i/snr", talker, prn);
 		publish_topicr(topic, 0, "%i", snr);
 	}
 }

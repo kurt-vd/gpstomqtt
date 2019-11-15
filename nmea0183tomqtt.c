@@ -468,6 +468,13 @@ static void recvd_gsa(void)
 
 	pktnr = strtoul(nmea_tok(NULL) ?: "1", NULL, 10);
 	if (pktnr == 1) {
+		/* only print on first packet */
+		if (!strcasecmp(talker, def_talker_mqtt ?: def_talker)) {
+			publish_topic(mktopic("mode"), "%s", fromtable(strmode, ival) ?: "");
+			publish_topic(mktopic("pdop"), "%.1lf", pdop);
+			publish_topic(mktopic("hdop"), "%.1lf", hdop);
+			publish_topic(mktopic("vdop"), "%.1lf", vdop);
+		}
 		publish_topic(mktopic("%s/mode", talker), "%s", fromtable(strmode, ival) ?: "");
 		publish_topic(mktopic("%s/pdop", talker), "%.1lf", pdop);
 		publish_topic(mktopic("%s/hdop", talker), "%.1lf", hdop);

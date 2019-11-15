@@ -74,6 +74,9 @@ static const char help_msg[] =
 	"			Adding -a may produce a lot of equal noise\n"
 	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash, default to 'gps/'\n"
 	" -d, --deadtime=DELAY	Consider port dead after DELAY seconds of silence (default 10)\n"
+	" -D, --default=TK	Set a default talker (GP, GN, BD, GL(?))\n"
+	"			The default talker's mode & dop will be published\n"
+	"			also without talker prefix for compatibility\n"
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
@@ -82,6 +85,7 @@ static const char help_msg[] =
 	" <PREFIX>/cfg/msgs	overrule --nmea parameter (empty value reverts to original)\n"
 	" <PREFIX>/cfg/always	set --always parameter\n"
 	" <PREFIX>/cfg/deadtime	set --deadtime parameter\n"
+	" <PREFIX>/cfg/default	set --default parameter\n"
 	;
 
 #ifdef _GNU_SOURCE
@@ -95,6 +99,7 @@ static struct option long_opts[] = {
 	{ "prefix", required_argument, NULL, 'p', },
 	{ "always", no_argument, NULL, 'a', },
 	{ "deadtime", required_argument, NULL, 'd', },
+	{ "default", required_argument, NULL, 'D', },
 
 	{ },
 };
@@ -102,7 +107,7 @@ static struct option long_opts[] = {
 #define getopt_long(argc, argv, optstring, longopts, longindex) \
 	getopt((argc), (argv), (optstring))
 #endif
-static const char optstring[] = "Vv?h:n:p:ad:";
+static const char optstring[] = "Vv?h:n:p:ad:D:";
 
 /* signal handler */
 static volatile int sigterm;
@@ -120,6 +125,8 @@ static struct mosquitto *mosq;
 
 static const char *nmea_use = "gga,zda,vtg";
 static char *nmea_use_mqtt; /* overrule nmea_use from mqtt */
+static const char *def_talker = "gp";
+static char *def_talker_mqtt;
 static const char *topicprefix = "gps/";
 static int topicprefixlen = 4;
 static int always;
@@ -205,6 +212,12 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 		} else if (!strcmp(stopic, "deadtime")) {
 			deaddelay = strtoul((char *)msg->payload ?: "10", NULL, 0);
 			mylog(LOG_NOTICE, "--%s changed to %u", stopic, deaddelay);
+
+		} else if (!strcmp(stopic, "default")) {
+			if (def_talker_mqtt)
+				free(def_talker_mqtt);
+			def_talker_mqtt = msg->payloadlen ? strdup(msg->payload) : NULL;
+			mylog(LOG_NOTICE, "--%s changed to %s", stopic, def_talker_mqtt ?: def_talker);
 		}
 	}
 }
@@ -655,6 +668,9 @@ int main(int argc, char *argv[])
 		break;
 	case 'd':
 		deaddelay = strtoul(optarg, NULL, 0);
+		break;
+	case 'D':
+		def_talker = optarg;
 		break;
 
 	default:

@@ -73,7 +73,7 @@ static const char help_msg[] =
 	"			to yield a coherent dataset\n"
 	"			Adding -a may produce a lot of equal noise\n"
 	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash, default to 'gps/'\n"
-	" -D, --deadtime=DELAY	Consider port dead after DELAY seconds of silence (default 10)\n"
+	" -d, --deadtime=DELAY	Consider port dead after DELAY seconds of silence (default 10)\n"
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"

@@ -61,6 +61,7 @@ static const char help_msg[] =
 	" -n, --nmea=GGA[,ZDA...]	Specify what message to forward\n"
 	"		Possible messages are:\n"
 	"		*GGA	lon, lat, alt, hdop, quality\n"
+	"		 GNS	lon, lat, alt, hdop, quality for all talkers\n"
 	"		 GSA	DOP & active satellites\n"
 	"		 GSV	Satellites in view info\n"
 	"		*VTG	Speed & heading\n"
@@ -427,7 +428,7 @@ static int nmea_is_valid_sentence(char *line)
 	return -1;
 }
 
-static void recvd_gga(void)
+static void recvd_gga_gns(const char *msg)
 {
 	double dval;
 	int ival;
@@ -447,8 +448,31 @@ static void recvd_gga(void)
 		dval *= -1;
 	publish_topic("lon", "%.7lf", dval);
 	/* fix */
-	ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	publish_topic("quality", "%s", fromtable(strquality, ival) ?: "");
+	if (!strcasecmp(msg+2, "GGA")) {
+		ival = strtoul(nmea_safe_tok(NULL), NULL, 10);
+		publish_topic("quality", "%s", fromtable(strquality, ival) ?: "");
+	} else {
+		/* gns message */
+		static const char gns_modes[] = "NADPRFEMS";
+		static const char *const talkers[] = {
+			"gp",
+			"gl",
+			"gb",
+			"ga",
+			NULL,
+		};
+		const char *const *talker;
+		const char *chr;
+		const char *tok;
+
+		for (tok = nmea_safe_tok(NULL), talker = talkers;
+				*talker && *tok; ++tok, ++talker) {
+			chr = strchr(gns_modes, toupper(*tok));
+			ival = chr ? chr - gns_modes : 0;
+			publish_topicrt(*talker, "mode", 1,
+					"%s", fromtable(strquality, ival) ?: "");
+		}
+	}
 	/* satvis */
 	publish_topic("satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
 	/* hdop */
@@ -462,8 +486,9 @@ static void recvd_gga(void)
 	nmea_tok(NULL);
 	/* geoidal seperation */
 	publish_topic("geoid", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
-	/* M for meters */
-	nmea_tok(NULL);
+	if (!strcasecmp(msg+2, "GGA"))
+		/* M for meters */
+		nmea_tok(NULL);
 	/* differential data
 	 */
 	publish_topic("diff/age", "%s", nmea_safe_tok(NULL));
@@ -591,8 +616,8 @@ static void recvd_line(char *line)
 	if (!strcasestr(nmea_use_mqtt ?: nmea_use, tok+2))
 		/* this sentence is blocked */
 		goto done;
-	else if (!strcmp(tok+2, "GGA"))
-		recvd_gga();
+	else if (!strcmp(tok+2, "GGA") || !strcmp(tok+2, "GNS"))
+		recvd_gga_gns(tok);
 	else if (!strcmp(tok+2, "GSA"))
 		recvd_gsa();
 	else if (!strcmp(tok+2, "GSV"))

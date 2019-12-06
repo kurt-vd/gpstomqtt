@@ -447,6 +447,12 @@ static void recvd_gga(void)
 	nmea_tok(NULL);
 	/* geoidal seperation */
 	publish_topic("geoid", "%.1lf", nmea_strtod(nmea_safe_tok(NULL)));
+	/* M for meters */
+	nmea_tok(NULL);
+	/* differential data
+	 */
+	publish_topic("diff/age", "%s", nmea_safe_tok(NULL));
+	publish_topic("diff/id", "%s", nmea_safe_tok(NULL));
 }
 
 static void recvd_gsa(void)

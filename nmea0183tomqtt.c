@@ -585,7 +585,8 @@ static void recvd_line(char *line)
 		return;
 	in_data_sentence = 0;
 	/* don't test the precise talker id */
-	memcpy(talker, tok, 2);
+	talker[0] = tolower(tok[0]);
+	talker[1] = tolower(tok[1]);
 
 	if (!strcasestr(nmea_use_mqtt ?: nmea_use, tok+2))
 		/* this sentence is blocked */

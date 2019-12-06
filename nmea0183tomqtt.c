@@ -161,10 +161,6 @@ static void my_exit(void)
 		mosquitto_disconnect(mosq);
 }
 
-/* forward decl */
-__attribute__((format(printf,3,4)))
-static void publish_topicr(const char *topic, int retain, const char *vfmt, ...);
-
 /* MQTT API */
 static char *myuuid;
 static const char selfsynctopic[] = "tmp/selfsync";
@@ -248,15 +244,19 @@ static const char *mktopic(const char *fmt, ...)
 	return topic;
 }
 
-#define publish_topic(topic, vfmt, ...) publish_topicr((topic), 1, (vfmt), ##__VA_ARGS__)
-__attribute__((format(printf,3,4)))
-static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
+#define FL_RETAIN 1
+#define FL_IGN_DEF_TALKER 2
+
+#define publish_topic(topic, vfmt, ...) publish_topicrt(talker, (topic), FL_RETAIN, (vfmt), ##__VA_ARGS__)
+#define publish_topicr(topic, flags, vfmt, ...) publish_topicrt(talker, (topic), (flags), (vfmt), ##__VA_ARGS__)
+
+static void publish_cache(const char *realtopic, const char *value, int retain);
+__attribute__((format(printf,4,5)))
+static void publish_topicrt(const char *talker, const char *topic, int flags, const char *vfmt, ...)
 {
 	va_list va;
-	int ret;
 	static char value[1024];
 	static char realtopic[1024];
-	struct topic *it;
 
 	va_start(va, vfmt);
 	vsprintf(value, vfmt, va);
@@ -265,7 +265,22 @@ static void publish_topicr(const char *topic, int retain, const char *vfmt, ...)
 	if (!strcmp(value, "nan"))
 		strcpy(value, "");
 
-	sprintf(realtopic, "%s%s", topicprefix, topic);
+	if (talker) {
+		sprintf(realtopic, "%s%s/%s", topicprefix, talker, topic);
+		publish_cache(realtopic, value, flags & FL_RETAIN);
+	}
+	if (flags & FL_IGN_DEF_TALKER)
+		return;
+	if (!talker || !strcmp(talker, def_talker_mqtt ?: def_talker)) {
+		sprintf(realtopic, "%s%s", topicprefix, topic);
+		publish_cache(realtopic, value, flags & FL_RETAIN);
+	}
+}
+
+static void publish_cache(const char *realtopic, const char *value, int retain)
+{
+	int ret;
+	struct topic *it;
 
 	if (!retain) {
 		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
@@ -475,16 +490,10 @@ static void recvd_gsa(void)
 	pktnr = strtoul(nmea_tok(NULL) ?: "1", NULL, 10);
 	if (pktnr == 1) {
 		/* only print on first packet */
-		if (!strcasecmp(talker, def_talker_mqtt ?: def_talker)) {
-			publish_topic(mktopic("mode"), "%s", fromtable(strmode, ival) ?: "");
-			publish_topic(mktopic("pdop"), "%.1lf", pdop);
-			publish_topic(mktopic("hdop"), "%.1lf", hdop);
-			publish_topic(mktopic("vdop"), "%.1lf", vdop);
-		}
-		publish_topic(mktopic("%s/mode", talker), "%s", fromtable(strmode, ival) ?: "");
-		publish_topic(mktopic("%s/pdop", talker), "%.1lf", pdop);
-		publish_topic(mktopic("%s/hdop", talker), "%.1lf", hdop);
-		publish_topic(mktopic("%s/vdop", talker), "%.1lf", vdop);
+		publish_topic("mode", "%s", fromtable(strmode, ival) ?: "");
+		publish_topic("pdop", "%.1lf", pdop);
+		publish_topic("hdop", "%.1lf", hdop);
+		publish_topic("vdop", "%.1lf", vdop);
 	}
 }
 
@@ -514,14 +523,14 @@ static void recvd_gsv(void)
 		 * which implies that we must listen to our own sat info
 		 * an remove 'lost' satellites ...
 		 */
-		topic = mktopic("%s/sat/%i/elv", talker, prn);
-		publish_topicr(topic, 0, "%i", elv);
+		topic = mktopic("sat/%i/elv", prn);
+		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", elv);
 
-		topic = mktopic("%s/sat/%i/azm", talker, prn);
-		publish_topicr(topic, 0, "%i", azm);
+		topic = mktopic("sat/%i/azm", prn);
+		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", azm);
 
-		topic = mktopic("%s/sat/%i/snr", talker, prn);
-		publish_topicr(topic, 0, "%i", snr);
+		topic = mktopic("sat/%i/snr", prn);
+		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", snr);
 	}
 }
 
@@ -759,7 +768,7 @@ int main(int argc, char *argv[])
 	/* schedule dead alarm */
 	alarm(deaddelay);
 
-	publish_topic("src", "%s", file ?: "-");
+	publish_topicrt(NULL, "src", 1, "%s", file ?: "-");
 	while (!sigterm) {
 		ret = poll(pf, 3, 1000);
 		if (ret < 0)
@@ -777,7 +786,7 @@ int main(int argc, char *argv[])
 			if (!ret)
 				break;
 			if (portalive < 1) {
-				publish_topic("alive", "1");
+				publish_topicrt(NULL, "alive", 1, "1");
 				flush_pending_topics();
 				portalive = 1;
 			}
@@ -805,7 +814,7 @@ gps_done:
 				break;
 			case SIGALRM:
 				if (portalive != 0) {
-					publish_topic("alive", "0");
+					publish_topicrt(NULL, "alive", 1, "0");
 					erase_topics(0);
 					flush_pending_topics();
 					portalive = 0;

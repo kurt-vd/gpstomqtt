@@ -74,7 +74,7 @@ static const char help_msg[] =
 	"			Adding -a may produce a lot of equal noise\n"
 	" -p, --prefix=PREFIX	Prefix MQTT topics, including final slash, default to 'gps/'\n"
 	" -d, --deadtime=DELAY	Consider port dead after DELAY seconds of silence (default 10)\n"
-	" -D, --default=TK	Set a default talker (GP, GN, BD, GL(?))\n"
+	" -D, --default=TK	Set a default talker (GP, GL, GB, GA, GN, ...)\n"
 	"			The default talker's mode & dop will be published\n"
 	"			also without talker prefix for compatibility\n"
 	"\n"

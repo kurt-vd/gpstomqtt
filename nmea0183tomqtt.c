@@ -667,6 +667,39 @@ done:
 	in_data_sentence = 0;
 }
 
+/* ublox */
+static uint16_t ublox_crc(const void *vdat, int len)
+{
+	const uint8_t *dat = vdat;
+	uint8_t cka = 0, ckb = 0;
+
+	for (; len; ++dat, --len) {
+		cka += *dat;
+		ckb += cka;
+	}
+	return (cka << 8) + ckb;
+}
+
+static void recvd_ublox_frame(const void *vdat, int len)
+{
+	const uint8_t *dat = vdat;
+	uint16_t f_ck, my_ck;
+	uint16_t clsid;
+
+	my_ck = ublox_crc(dat+2, len-4);
+	memcpy(&f_ck, dat+len-2, 2);
+	f_ck = be16toh(f_ck);
+	if (f_ck != my_ck) {
+		mylog(LOG_WARNING, "ublox: crc mismatch");
+		return;
+	}
+	memcpy(&clsid, dat+2, 2);
+	/* class/id is formatted as BigEndian */
+	clsid = be16toh(clsid);
+	mylog(LOG_INFO, "ublox: %04x+%u", clsid, len-8);
+}
+
+/* multiplexer */
 static char *buf;
 static size_t buflen;
 static size_t bufsize;
@@ -689,6 +722,23 @@ static void recvd_data(const char *line, int len)
 	buf[buflen] = 0; /* null terminate */
 	/* parse */
 	for (bufpos = 0;;) {
+		if (!memcmp(buf+bufpos, (uint8_t[]){ 0xb5, 0x62, }, 2)) {
+			/* ublox header */
+			uint16_t v16;
+
+			if ((buflen - bufpos) < 8)
+				/* incomplete empty ublox frame */
+				break;
+			memcpy(&v16, buf+bufpos+4, 2);
+			v16 = le16toh(v16);
+			v16 = buf[bufpos+4];
+			if ((buflen - bufpos) < (v16+8))
+				/* incomplete ublox frame */
+				break;
+			recvd_ublox_frame(buf+bufpos, v16+8);
+			bufpos += v16+8;
+			continue;
+		}
 		str = strchr(buf+bufpos, '\n');
 		if (!str)
 			break;

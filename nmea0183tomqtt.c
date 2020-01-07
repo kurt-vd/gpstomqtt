@@ -157,6 +157,8 @@ static int mqtt_port = 1883;
 static int mqtt_keepalive = 10;
 static int mqtt_qos = -1;
 
+static char *file = "<stdin>";
+
 /* state */
 static struct mosquitto *mosq;
 
@@ -595,6 +597,27 @@ static void recvd_gsv(void)
 	}
 }
 
+static void recvd_txt(void)
+{
+	int level;
+	const char *msg;
+	static const int levels[256] = {
+		[0] = LOG_ERR,
+		[1] = LOG_WARNING,
+		[2] = LOG_NOTICE,
+		[7] = LOG_INFO,
+	};
+
+	nmea_tok(NULL);
+	nmea_tok(NULL);
+
+	level = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	msg = nmea_tok(NULL);
+
+	if (levels[level] && msg)
+		mylog(levels[level], "%s '%s'", file, msg);
+}
+
 static void recvd_vtg(void)
 {
 	int j;
@@ -649,7 +672,9 @@ static void recvd_line(char *line)
 	talker[0] = tolower(tok[0]);
 	talker[1] = tolower(tok[1]);
 
-	if (!strcasestr(nmea_use_mqtt ?: nmea_use, tok+2))
+	if (!strcmp(tok+2, "TXT"))
+		recvd_txt();
+	else if (!strcasestr(nmea_use_mqtt ?: nmea_use, tok+2))
 		/* this sentence is blocked */
 		goto done;
 	else if (!strcmp(tok+2, "GGA") || !strcmp(tok+2, "GNS"))
@@ -819,7 +844,6 @@ int main(int argc, char *argv[])
 	atexit(my_exit);
 	setlogmask(logmask);
 
-	char *file;
 	if (optind < argc) {
 		/* extra file|device argument */
 		file = argv[optind++];

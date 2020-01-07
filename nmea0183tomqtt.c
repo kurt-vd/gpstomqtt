@@ -32,6 +32,7 @@
 #include <locale.h>
 #include <poll.h>
 #include <syslog.h>
+#include <termios.h>
 #include <mosquitto.h>
 #include <sys/signalfd.h>
 #include <sys/uio.h>
@@ -772,11 +773,20 @@ int main(int argc, char *argv[])
 		/* extra file|device argument */
 		file = argv[optind++];
 		int fd;
+		struct termios term;
 
 		/* open file */
 		fd = open(file, O_RDWR | O_NOCTTY | O_NONBLOCK);
 		if (fd < 0)
 			mylog(LOG_ERR, "open %s: %s", file, ESTR(errno));
+		/* prepare port */
+		if (tcgetattr(fd, &term) < 0)
+			mylog(LOG_ERR, "tcgetattr %s: %s", file, ESTR(errno));
+		term.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | IXON | INLCR | IGNCR | ICRNL | INPCK);
+		term.c_oflag &= ~(OPOST);
+		term.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+		if (tcsetattr(fd, TCSAFLUSH, &term) < 0)
+			mylog(LOG_ERR, "tcsetattr %s: %s", file, ESTR(errno));
 		/* set file|device as stdin */
 		dup2(fd, STDIN_FILENO);
 		close(fd);

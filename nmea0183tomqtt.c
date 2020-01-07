@@ -43,6 +43,13 @@
 #endif
 
 /* generic error logging */
+#define LOG_EXIT	0x4000000
+
+/* safeguard our LOG_EXIT extension */
+#if (LOG_EXIT & (LOG_FACMASK | LOG_PRIMASK))
+#error LOG_EXIT conflict
+#endif
+
 static int logtostderr = -1;
 
 void mylog(int loglevel, const char *fmt, ...)
@@ -79,7 +86,7 @@ void mylog(int loglevel, const char *fmt, ...)
 		vsyslog(loglevel & LOG_PRIMASK, fmt, va);
 		va_end(va);
 	}
-	if (loglevel <= LOG_ERR)
+	if (loglevel & LOG_EXIT)
 		exit(1);
 }
 
@@ -211,10 +218,10 @@ static void send_self_sync(struct mosquitto *mosq)
 
 	ret = mosquitto_subscribe(mosq, NULL, selfsynctopic, mqtt_qos);
 	if (ret)
-		mylog(LOG_ERR, "mosquitto_subscribe %s: %s", selfsynctopic, mosquitto_strerror(ret));
+		mylog(LOG_ERR | LOG_EXIT, "mosquitto_subscribe %s: %s", selfsynctopic, mosquitto_strerror(ret));
 	ret = mosquitto_publish(mosq, NULL, selfsynctopic, strlen(myuuid), myuuid, mqtt_qos, 0);
 	if (ret)
-		mylog(LOG_ERR, "mosquitto_publish %s: %s", selfsynctopic, mosquitto_strerror(ret));
+		mylog(LOG_ERR | LOG_EXIT, "mosquitto_publish %s: %s", selfsynctopic, mosquitto_strerror(ret));
 }
 static int is_self_sync(const struct mosquitto_message *msg)
 {
@@ -324,7 +331,7 @@ static void publish_cache(const char *realtopic, const char *value, int retain)
 	if (!retain) {
 		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
 		if (ret)
-			mylog(LOG_ERR, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
+			mylog(LOG_ERR | LOG_EXIT, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
 		return;
 	}
 
@@ -335,7 +342,7 @@ static void publish_cache(const char *realtopic, const char *value, int retain)
 	if (!it) {
 		it = malloc(sizeof(*it));
 		if (!it)
-			mylog(LOG_ERR, "malloc failed: %s", ESTR(errno));
+			mylog(LOG_ERR | LOG_EXIT, "malloc failed: %s", ESTR(errno));
 		memset(it, 0, sizeof(*it));
 		/* append to linked list */
 		if (!topics) {
@@ -368,7 +375,7 @@ static void flush_pending_topics(void)
 		if (it->written && (ndirty || always)) {
 			ret = mosquitto_publish(mosq, NULL, it->topic, strlen(it->payload ?: ""), it->payload, mqtt_qos, it->retain);
 			if (ret)
-				mylog(LOG_ERR, "mosquitto_publish %s: %s", it->topic, mosquitto_strerror(ret));
+				mylog(LOG_ERR | LOG_EXIT, "mosquitto_publish %s: %s", it->topic, mosquitto_strerror(ret));
 		}
 		it->written = 0;
 	}
@@ -739,7 +746,7 @@ static void recvd_data(const char *line, int len)
 		bufsize = (buflen+len+1+1023) & ~1023;
 		buf = realloc(buf, bufsize);
 		if (!buf)
-			mylog(LOG_ERR, "realloc");
+			mylog(LOG_ERR | LOG_EXIT, "realloc");
 	}
 	/* append */
 	memcpy(buf+buflen, line, len);
@@ -853,15 +860,15 @@ int main(int argc, char *argv[])
 		/* open file */
 		fd = open(file, O_RDWR | O_NOCTTY | O_NONBLOCK);
 		if (fd < 0)
-			mylog(LOG_ERR, "open %s: %s", file, ESTR(errno));
+			mylog(LOG_ERR | LOG_EXIT, "open %s: %s", file, ESTR(errno));
 		/* prepare port */
 		if (tcgetattr(fd, &term) < 0)
-			mylog(LOG_ERR, "tcgetattr %s: %s", file, ESTR(errno));
+			mylog(LOG_ERR | LOG_EXIT, "tcgetattr %s: %s", file, ESTR(errno));
 		term.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | IXON | INLCR | IGNCR | ICRNL | INPCK);
 		term.c_oflag &= ~(OPOST);
 		term.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
 		if (tcsetattr(fd, TCSAFLUSH, &term) < 0)
-			mylog(LOG_ERR, "tcsetattr %s: %s", file, ESTR(errno));
+			mylog(LOG_ERR | LOG_EXIT, "tcsetattr %s: %s", file, ESTR(errno));
 		/* set file|device as stdin */
 		dup2(fd, STDIN_FILENO);
 		close(fd);
@@ -874,18 +881,18 @@ int main(int argc, char *argv[])
 	sprintf(mqtt_name, "%s-%i", NAME, getpid());
 	mosq = mosquitto_new(mqtt_name, true, NULL);
 	if (!mosq)
-		mylog(LOG_ERR, "mosquitto_new failed: %s", ESTR(errno));
+		mylog(LOG_ERR | LOG_EXIT, "mosquitto_new failed: %s", ESTR(errno));
 	/* mosquitto_will_set(mosq, "TOPIC", 0, NULL, mqtt_qos, 1); */
 
 	ret = mosquitto_connect(mosq, mqtt_host, mqtt_port, mqtt_keepalive);
 	if (ret)
-		mylog(LOG_ERR, "mosquitto_connect %s:%i: %s", mqtt_host, mqtt_port, mosquitto_strerror(ret));
+		mylog(LOG_ERR | LOG_EXIT, "mosquitto_connect %s:%i: %s", mqtt_host, mqtt_port, mosquitto_strerror(ret));
 	mosquitto_message_callback_set(mosq, my_mqtt_msg);
 
 	asprintf(&str, "%s%s#", topicprefix, cfgprefix);
 	ret = mosquitto_subscribe(mosq, NULL, str, mqtt_qos);
 	if (ret)
-		mylog(LOG_ERR, "mosquitto_subscribe %s: %s", str, mosquitto_strerror(ret));
+		mylog(LOG_ERR | LOG_EXIT, "mosquitto_subscribe %s: %s", str, mosquitto_strerror(ret));
 	free(str);
 
 	/* prepare signalfd */
@@ -897,10 +904,10 @@ int main(int argc, char *argv[])
 	sigfillset(&sigmask);
 
 	if (sigprocmask(SIG_BLOCK, &sigmask, NULL) < 0)
-		mylog(LOG_ERR, "sigprocmask: %s", ESTR(errno));
+		mylog(LOG_ERR | LOG_EXIT, "sigprocmask: %s", ESTR(errno));
 	sigfd = signalfd(-1, &sigmask, SFD_NONBLOCK | SFD_CLOEXEC);
 	if (sigfd < 0)
-		mylog(LOG_ERR, "signalfd failed: %s", ESTR(errno));
+		mylog(LOG_ERR | LOG_EXIT, "signalfd failed: %s", ESTR(errno));
 
 	/* prepare poll */
 	pf[0].fd = STDIN_FILENO;
@@ -918,7 +925,7 @@ int main(int argc, char *argv[])
 	while (!sigterm) {
 		ret = poll(pf, 3, 1000);
 		if (ret < 0)
-			mylog(LOG_ERR, "poll ...");
+			mylog(LOG_ERR | LOG_EXIT, "poll ...");
 		if (pf[0].revents) {
 			/* read input events */
 			ret = read(STDIN_FILENO, line, sizeof(line));
@@ -926,7 +933,7 @@ int main(int argc, char *argv[])
 				/* another reader snooped our data away */
 				goto gps_done;
 			if (ret < 0)
-				mylog(LOG_ERR, "read stdin: %s", ESTR(errno));
+				mylog(LOG_ERR | LOG_EXIT, "read stdin: %s", ESTR(errno));
 			/* schedule dead alarm */
 			alarm(deaddelay);
 			if (!ret)
@@ -943,14 +950,14 @@ gps_done:
 			/* mqtt read ... */
 			ret = mosquitto_loop_read(mosq, 1);
 			if (ret)
-				mylog(LOG_ERR, "mosquitto_loop_read: %s", mosquitto_strerror(ret));
+				mylog(LOG_ERR | LOG_EXIT, "mosquitto_loop_read: %s", mosquitto_strerror(ret));
 		}
 		while (pf[2].revents) {
 			ret = read(sigfd, &sfdi, sizeof(sfdi));
 			if (ret < 0 && errno == EAGAIN)
 				break;
 			if (ret < 0)
-				mylog(LOG_ERR, "read signalfd: %s", ESTR(errno));
+				mylog(LOG_ERR | LOG_EXIT, "read signalfd: %s", ESTR(errno));
 			switch (sfdi.ssi_signo) {
 			case SIGTERM:
 			case SIGINT:
@@ -971,11 +978,11 @@ gps_done:
 		/* mosquitto things to do each iteration */
 		ret = mosquitto_loop_misc(mosq);
 		if (ret)
-			mylog(LOG_ERR, "mosquitto_loop_misc: %s", mosquitto_strerror(ret));
+			mylog(LOG_ERR | LOG_EXIT, "mosquitto_loop_misc: %s", mosquitto_strerror(ret));
 		if (mosquitto_want_write(mosq)) {
 			ret = mosquitto_loop_write(mosq, 1);
 			if (ret)
-				mylog(LOG_ERR, "mosquitto_loop_write: %s", mosquitto_strerror(ret));
+				mylog(LOG_ERR | LOG_EXIT, "mosquitto_loop_write: %s", mosquitto_strerror(ret));
 		}
 	}
 
@@ -985,7 +992,7 @@ gps_done:
 	while (!ready) {
 		ret = mosquitto_loop(mosq, 10, 1);
 		if (ret)
-			mylog(LOG_ERR, "mosquitto_loop: %s", mosquitto_strerror(ret));
+			mylog(LOG_ERR | LOG_EXIT, "mosquitto_loop: %s", mosquitto_strerror(ret));
 	}
 
 	return 0;

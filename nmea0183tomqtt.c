@@ -667,42 +667,43 @@ done:
 	in_data_sentence = 0;
 }
 
-static char *lines;
-static size_t linesize;
-static size_t linepos;
+static char *buf;
+static size_t buflen;
+static size_t bufsize;
 
-static void recvd_lines(const char *line)
+static void recvd_data(const char *line, int len)
 {
-	int len = strlen(line);
-	int mylen = strlen(lines ?: "");
 	char *str;
+	size_t bufpos;
 
-	if (mylen + len + 1 > linesize) {
+	if (buflen + len + 1 > bufsize) {
 		/* grow */
-		linesize = (mylen+len+1+1023) & ~1023;
-		lines = realloc(lines, linesize);
-		if (!lines)
+		bufsize = (buflen+len+1+1023) & ~1023;
+		buf = realloc(buf, bufsize);
+		if (!buf)
 			mylog(LOG_ERR, "realloc");
 	}
 	/* append */
-	strcpy(lines+mylen, line);
+	memcpy(buf+buflen, line, len);
+	buflen += len;
+	buf[buflen] = 0; /* null terminate */
 	/* parse */
-	for (;;) {
-		str = strchr(lines+linepos, '\n');
+	for (bufpos = 0;;) {
+		str = strchr(buf+bufpos, '\n');
 		if (!str)
 			break;
-		if (str > lines+linepos && *(str-1) == '\r')
+		if (str > buf+bufpos && *(str-1) == '\r')
 			/* cut \r too */
 			*(str-1) = 0;
 		/* null-terminate */
 		*str++ = 0;
-		recvd_line(lines+linepos);
-		linepos = str-lines;
+		recvd_line(buf+bufpos);
+		bufpos = str-buf;
 	}
 	/* forget consumed data */
-	if (linepos)
-		memcpy(lines, lines+linepos, mylen+len-linepos+1);
-	linepos = 0;
+	if (bufpos)
+		memcpy(buf, buf+bufpos, buflen-bufpos+1);
+	buflen -= bufpos;
 }
 
 int main(int argc, char *argv[])
@@ -846,7 +847,7 @@ int main(int argc, char *argv[])
 			mylog(LOG_ERR, "poll ...");
 		if (pf[0].revents) {
 			/* read input events */
-			ret = read(STDIN_FILENO, line, sizeof(line)-1);
+			ret = read(STDIN_FILENO, line, sizeof(line));
 			if (ret < 0 && errno == EAGAIN)
 				/* another reader snooped our data away */
 				goto gps_done;
@@ -861,9 +862,7 @@ int main(int argc, char *argv[])
 				flush_pending_topics();
 				portalive = 1;
 			}
-
-			line[ret] = 0;
-			recvd_lines(line);
+			recvd_data(line, ret);
 		}
 gps_done:
 		if (pf[1].revents) {

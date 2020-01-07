@@ -34,6 +34,7 @@
 #include <syslog.h>
 #include <mosquitto.h>
 #include <sys/signalfd.h>
+#include <sys/uio.h>
 
 #define NAME "nmea0183tomqtt"
 #ifndef VERSION
@@ -41,12 +42,46 @@
 #endif
 
 /* generic error logging */
-#define mylog(loglevel, fmt, ...) \
-	({\
-		syslog(loglevel, fmt, ##__VA_ARGS__); \
-		if (loglevel <= LOG_ERR)\
-			exit(1);\
-	})
+static int logtostderr = -1;
+
+void mylog(int loglevel, const char *fmt, ...)
+{
+	va_list va;
+	char *msg = NULL;
+
+	if (logtostderr < 0)
+		logtostderr = abs(isatty(STDERR_FILENO));
+
+	if (logtostderr) {
+		struct timespec tv;
+		char timbuf[64];
+
+		clock_gettime(CLOCK_REALTIME, &tv);
+		strftime(timbuf, sizeof(timbuf), "%b %d %H:%M:%S", localtime(&tv.tv_sec));
+		sprintf(timbuf+strlen(timbuf), ".%03u ", (int)(tv.tv_nsec/1000000));
+
+		va_start(va, fmt);
+		vasprintf(&msg, fmt, va);
+		va_end(va);
+
+		struct iovec vec[] = {
+			{ .iov_base = timbuf, .iov_len = strlen(timbuf), },
+			{ .iov_base = NAME, .iov_len = strlen(NAME), },
+			{ .iov_base = ": ", .iov_len = 2, },
+			{ .iov_base = msg, .iov_len = strlen(msg), },
+			{ .iov_base = "\n", .iov_len = 1, },
+		};
+		writev(STDERR_FILENO, vec, sizeof(vec)/sizeof(vec[0]));
+		free(msg);
+	} else {
+		va_start(va, fmt);
+		vsyslog(loglevel & LOG_PRIMASK, fmt, va);
+		va_end(va);
+	}
+	if (loglevel <= LOG_ERR)
+		exit(1);
+}
+
 #define ESTR(num)	strerror(num)
 
 /* program options */

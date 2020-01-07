@@ -120,7 +120,8 @@ static const char help_msg[] =
 	" -d, --deadtime=DELAY	Consider port dead after DELAY seconds of silence (default 10)\n"
 	" -D, --default=TK	Set a default talker (GP, GL, GB, GA, GN, ...)\n"
 	"			The default talker's mode & dop will be published\n"
-	"			also without talker prefix for compatibility\n"
+	"			without talker prefix for compatibility\n"
+	"			Set to '0' to have no default talker\n"
 	"\n"
 	"Arguments\n"
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
@@ -311,16 +312,12 @@ static void publish_topicrt(const char *talker, const char *topic, int flags, co
 	if (!strcmp(value, "nan"))
 		strcpy(value, "");
 
-	if (talker) {
+	if (talker && ((flags & FL_IGN_DEF_TALKER) || strcmp(talker, def_talker_mqtt ?: def_talker)))
 		sprintf(realtopic, "%s%s/%s", topicprefix, talker, topic);
-		publish_cache(realtopic, value, flags & FL_RETAIN);
-	}
-	if (flags & FL_IGN_DEF_TALKER)
-		return;
-	if (!talker || !strcmp(talker, def_talker_mqtt ?: def_talker)) {
+	else
 		sprintf(realtopic, "%s%s", topicprefix, topic);
-		publish_cache(realtopic, value, flags & FL_RETAIN);
-	}
+
+	publish_cache(realtopic, value, flags & FL_RETAIN);
 }
 
 static void publish_cache(const char *realtopic, const char *value, int retain)

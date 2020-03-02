@@ -619,7 +619,7 @@ static void recvd_txt(void)
 	msg = nmea_tok(NULL);
 
 	if (levels[level] && msg)
-		mylog(levels[level], "%s '%s'", file, msg);
+		mylog(levels[level], "%s %c%cTXT '%s'", file, toupper(talker[0]), toupper(talker[1]), msg);
 }
 
 static void recvd_vtg(void)

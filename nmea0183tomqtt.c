@@ -880,7 +880,13 @@ int main(int argc, char *argv[])
 	mosq = mosquitto_new(mqtt_name, true, NULL);
 	if (!mosq)
 		mylog(LOG_ERR | LOG_EXIT, "mosquitto_new failed: %s", ESTR(errno));
-	/* mosquitto_will_set(mosq, "TOPIC", 0, NULL, mqtt_qos, 1); */
+
+	char *willtopic;
+	asprintf(&willtopic, "%salive", topicprefix);
+	ret = mosquitto_will_set(mosq, willtopic, 7, "crashed", mqtt_qos, 1);
+	if (ret)
+		mylog(LOG_ERR | LOG_EXIT, "mosquitto_will_set: %s", mosquitto_strerror(ret));
+	free(willtopic);
 
 	ret = mosquitto_connect(mosq, mqtt_host, mqtt_port, mqtt_keepalive);
 	if (ret)

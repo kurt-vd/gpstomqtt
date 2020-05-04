@@ -858,15 +858,19 @@ int main(int argc, char *argv[])
 		fd = open(file, O_RDWR | O_NOCTTY | O_NONBLOCK);
 		if (fd < 0)
 			mylog(LOG_ERR | LOG_EXIT, "open %s: %s", file, ESTR(errno));
+
 		/* prepare port */
-		if (tcgetattr(fd, &term) < 0)
-			mylog(LOG_ERR | LOG_EXIT, "tcgetattr %s: %s", file, ESTR(errno));
-		term.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | IXON | INLCR | IGNCR | ICRNL | INPCK);
-		term.c_oflag &= ~(OPOST);
-		term.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-		/* Replacing TCSAFLUSH by TCSANOW to avoid standard GPS blocked on some machines. */
-		if (tcsetattr(fd, TCSANOW /*TCSAFLUSH*/, &term) < 0)
-			mylog(LOG_ERR | LOG_EXIT, "tcsetattr %s: %s", file, ESTR(errno));
+		if (tcgetattr(fd, &term) < 0) {
+			if (errno != ENOTTY)
+				mylog(LOG_ERR | LOG_EXIT, "tcgetattr %s: %s", file, ESTR(errno));
+		} else {
+			term.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | IXON | INLCR | IGNCR | ICRNL | INPCK);
+			term.c_oflag &= ~(OPOST);
+			term.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
+			/* Replacing TCSAFLUSH by TCSANOW to avoid standard GPS blocked on some machines. */
+			if (tcsetattr(fd, TCSANOW, &term) < 0)
+				mylog(LOG_ERR | LOG_EXIT, "tcsetattr %s: %s", file, ESTR(errno));
+		}
 		/* set file|device as stdin */
 		dup2(fd, STDIN_FILENO);
 		close(fd);

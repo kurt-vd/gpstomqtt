@@ -101,7 +101,8 @@ static const char help_msg[] =
 	" -V, --version		Show version\n"
 	" -v, --verbose		Be more verbose\n"
 	" -h, --host=HOST[:PORT]Specify alternate MQTT host+port\n"
-	" -n, --nmea=GGA[,ZDA...]	Specify what message to forward\n"
+	" -n, --nmea=GGA[,ZDA...]	Specify what message to forward, absolute mode\n"
+	" -n, --nmea=+/-GGA[,+/-ZDA...]	Specify what message to forward, relative mode\n"
 	"		Possible messages are:\n"
 	"		*GGA	lon, lat, alt, hdop, quality\n"
 	"		 GNS	lon, lat, alt, hdop, quality for all talkers\n"
@@ -127,7 +128,7 @@ static const char help_msg[] =
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
 	"\n"
 	"Runtime configuration via MQTT\n"
-	" <PREFIX>/cfg/msgs	overrule --nmea parameter (empty value reverts to original)\n"
+	" <PREFIX>/cfg/msgs	identical to --nmea parameter\n"
 	" <PREFIX>/cfg/always	set --always parameter\n"
 	" <PREFIX>/cfg/deadtime	set --deadtime parameter\n"
 	" <PREFIX>/cfg/default	set --default parameter\n"
@@ -170,8 +171,7 @@ static char *file = "<stdin>";
 /* state */
 static struct mosquitto *mosq;
 
-static const char *nmea_use = "gga,zda,vtg";
-static char *nmea_use_mqtt; /* overrule nmea_use from mqtt */
+static char nmea_use[] = "+gga,-gns,-gsa,-gsv,+vtg,+zda\0\0";
 static const char *def_talker = "gp";
 static char *def_talker_mqtt;
 static const char *topicprefix = "gps/";
@@ -206,6 +206,38 @@ static void my_exit(void)
 {
 	if (mosq)
 		mosquitto_disconnect(mosq);
+}
+
+/* message list api */
+static int nmea_use_msg(const char *msg)
+{
+	char *str;
+
+	str = strcasestr(nmea_use, msg);
+	if (!str)
+		return 0;
+	return *(str-1) == '+';
+}
+static void merge_nmea_use(char *msgs)
+{
+	char *tok, *str;
+	char mod;
+
+	if (msgs[0] != '+' && msgs[0] != '-') {
+		/* absolute mode, reset all */
+		for (str = nmea_use; *str; str += 5)
+			*(str-1) = '-';
+	}
+	for (tok = strtok(msgs, ","); tok; tok = strtok(NULL, ",")) {
+		if (strchr("+-", tok[0]))
+			mod = *tok++;
+		else
+			mod = '+';
+
+		str = strcasestr(nmea_use, tok);
+		if (str)
+			*(str-1) = mod;
+	}
 }
 
 /* MQTT API */
@@ -243,10 +275,10 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 		const char *stopic = msg->topic + topicprefixlen + cfgprefixlen;
 
 		if (!strcmp(stopic, "msgs")) {
-			if (nmea_use_mqtt)
-				free(nmea_use_mqtt);
-			nmea_use_mqtt = msg->payloadlen ? strdup((char *)msg->payload) : NULL;
-			mylog(LOG_NOTICE, "nmea msgs overrule to '%s'", nmea_use_mqtt ?: "");
+			if (!msg->payloadlen)
+				return;
+			merge_nmea_use((char *)msg->payload);
+			mylog(LOG_NOTICE, "nmea msgs changed to '%s'", nmea_use);
 
 		} else if (!strcmp(stopic, "always")) {
 			always = strtoul((char *)msg->payload ?: "0", NULL, 0);
@@ -519,7 +551,7 @@ static void recvd_gga_gns(const char *msg)
 	publish_topic("satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
-	if (!strcasestr(nmea_use_mqtt ?: nmea_use, "GSA"))
+	if (nmea_use_msg("GSA"))
 		/* publish hdop from GGA only if GSA is not used */
 		publish_topic("hdop", "%.1lf", dval);
 	/* altitude */
@@ -678,7 +710,7 @@ static void recvd_line(char *line)
 
 	if (!strcmp(tok+2, "TXT"))
 		recvd_txt();
-	else if (!strcasestr(nmea_use_mqtt ?: nmea_use, tok+2))
+	else if (!nmea_use_msg(tok+2))
 		/* this sentence is blocked */
 		goto done;
 	else if (!strcmp(tok+2, "GGA") || !strcmp(tok+2, "GNS"))
@@ -821,7 +853,9 @@ int main(int argc, char *argv[])
 		}
 		break;
 	case 'n':
-		nmea_use = optarg;
+		optarg = strdup(optarg);
+		merge_nmea_use(optarg);
+		free(optarg);
 		break;
 	case 'p':
 		topicprefix = optarg;

@@ -864,7 +864,8 @@ int main(int argc, char *argv[])
 		term.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | IXON | INLCR | IGNCR | ICRNL | INPCK);
 		term.c_oflag &= ~(OPOST);
 		term.c_lflag &= ~(ECHO | ECHONL | ICANON | ISIG | IEXTEN);
-		if (tcsetattr(fd, TCSAFLUSH, &term) < 0)
+		/* Replacing TCSAFLUSH by TCSANOW to avoid standard GPS blocked on some machines. */
+		if (tcsetattr(fd, TCSANOW /*TCSAFLUSH*/, &term) < 0)
 			mylog(LOG_ERR | LOG_EXIT, "tcsetattr %s: %s", file, ESTR(errno));
 		/* set file|device as stdin */
 		dup2(fd, STDIN_FILENO);

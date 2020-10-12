@@ -599,15 +599,17 @@ static void recvd_gsa(void)
 static void recvd_gsv(void)
 {
 	__attribute__((unused))
-	int isent, nsent;
+	int msgcnt, msgidx;
+	int nsat;
 	int prn, elv, azm, snr;
 	int j;
 	char *tok;
 	const char *topic;
 
-	nsent = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	isent = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	nmea_tok(NULL); /* #sats in view */
+	msgcnt = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	msgidx = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	nsat = strtoul(nmea_safe_tok(NULL), NULL, 10); /* #sats in view */
+
 	for (j = 0; j < 4; ++j) {
 		tok = nmea_safe_tok(NULL);
 		if (!strlen(tok))
@@ -631,6 +633,12 @@ static void recvd_gsv(void)
 		topic = mktopic("sat/%i/snr", prn);
 		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", snr);
 	}
+	if (msgidx == msgcnt)
+		/* emit number of sats in view
+		 * not to confuse with 'satvis' which is 'satinuse'
+		 * This can also act as a terminator of the satellite list
+		 */
+		publish_topicr("satrecvd", FL_IGN_DEF_TALKER, "%i", nsat);
 }
 
 static void recvd_txt(void)

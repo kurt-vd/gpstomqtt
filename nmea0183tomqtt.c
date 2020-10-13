@@ -600,6 +600,38 @@ static void recvd_gsa(void)
 	}
 }
 
+/* GSV: keep track of satellites */
+struct sat {
+	int snr;
+	int elv;
+	int azm;
+	int8_t recvd; /* recvd from NMEA */
+	int8_t sent; /* sent to MQTT */
+};
+static struct sat *sats;
+static int ssats;
+/* range of sat. ids:
+ * 1..32: GPS
+ * 33..54: SBAS
+ * 64..88/96: GLONASS
+ * 193..195: QZSS
+ * 201..235: Beidou
+ * 301..336: Galileo
+ */
+
+struct gsv {
+	char talker[3];
+	int satmin, satmax;
+	int satview;
+	int new;
+	time_t trecvd;
+};
+
+static struct gsv *gsvs;
+static int ngsvs, sgsvs;
+
+static void clear_sat(const char *talker, int prn);
+
 static void recvd_gsv(void)
 {
 	__attribute__((unused))
@@ -608,11 +640,38 @@ static void recvd_gsv(void)
 	int prn, elv, azm, snr;
 	int j;
 	char *tok;
-	const char *topic;
+	struct gsv *gsv, *gsvend;
+	struct sat *sat;
+
+	gsvend = gsvs+ngsvs;
+	for (gsv = gsvs; gsv < gsvend; ++gsv) {
+		if (!strcmp(talker, gsv->talker))
+			break;
+	}
+	if (gsv >= gsvend) {
+		if (ngsvs >= sgsvs) {
+			sgsvs += 16;
+			gsvs = realloc(gsvs, sgsvs*sizeof(*gsvs));
+			if (!gsvs)
+				mylog(LOG_ERR | LOG_EXIT, "realloc %u gsvs: %s", sgsvs, ESTR(errno));
+		}
+		gsv = gsvs+ngsvs++;
+		/* init new gsv struct */
+		memset(gsv, 0, sizeof(*gsv));
+		strcpy(gsv->talker, talker);
+		gsv->new = 1;
+	}
 
 	msgcnt = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	msgidx = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	nsat = strtoul(nmea_safe_tok(NULL), NULL, 10); /* #sats in view */
+
+	gsv->trecvd = time(NULL);
+	if (msgidx == 1) {
+		/* start of block */
+		for (j = gsv->satmin; j <= gsv->satmax && j < ssats; ++j)
+			sats[j].recvd = 0;
+	}
 
 	for (j = 0; j < 4; ++j) {
 		tok = nmea_safe_tok(NULL);
@@ -623,26 +682,93 @@ static void recvd_gsv(void)
 		azm = strtoul(nmea_safe_tok(NULL), NULL, 10);
 		snr = strtoul(nmea_safe_tok(NULL), NULL, 10);
 
+		if (prn > ssats) {
+			int oldssats = ssats;
+			ssats = ssats ? ((prn + 127) & ~127) : 128;
+			sats = realloc(sats, sizeof(*sats)*ssats);
+			if (!sats)
+				mylog(LOG_ERR | LOG_EXIT, "realloc %i sats: %s", ssats, ESTR(errno));
+			memset(sats+oldssats, 0, sizeof(*sats)*(ssats - oldssats));
+		}
+
+		sat = sats+prn;
+
 		/* publish satellite info non-retained.
 		 * retained messages should be cleaned up,
 		 * which implies that we must listen to our own sat info
 		 * an remove 'lost' satellites ...
 		 */
-		topic = mktopic("sat/%i/elv", prn);
-		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", elv);
+#define GSV_FLAGS	(FL_RETAIN | FL_NO_CACHE | FL_IGN_DEF_TALKER)
+		if (always || !sat->sent || elv != sat->elv)
+			publish_topicr(mktopic("sat/%i/elv", prn), GSV_FLAGS, "%i", elv);
+		if (always || !sat->sent || azm != sat->azm)
+			publish_topicr(mktopic("sat/%i/azm", prn), GSV_FLAGS, "%i", azm);
+		if (always || !sat->sent || snr != sat->snr)
+			publish_topicr(mktopic("sat/%i/snr", prn), GSV_FLAGS, "%i", snr);
+		sat->elv = elv;
+		sat->azm = azm;
+		sat->snr = snr;
+		sat->recvd = 1;
+		sat->sent = 1;
 
-		topic = mktopic("sat/%i/azm", prn);
-		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", azm);
-
-		topic = mktopic("sat/%i/snr", prn);
-		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", snr);
+		/* keep track of min/max prn of a talker */
+		if (prn < gsv->satmin || !gsv->satmax)
+			gsv->satmin = prn;
+		if (prn > gsv->satmax)
+			gsv->satmax = prn;
 	}
-	if (msgidx == msgcnt)
+	if (msgidx == msgcnt) {
+		for (j = gsv->satmin; j < gsv->satmax; ++j)
+			if (sats[j].sent && !sats[j].recvd)
+				clear_sat(talker, j);
 		/* emit number of sats in view
-		 * not to confuse with 'satvis' which is 'satinuse'
+		 * not to confuse with 'satvis' which is actually 'satinuse'
 		 * This can also act as a terminator of the satellite list
 		 */
-		publish_topicr("satrecvd", FL_IGN_DEF_TALKER, "%i", nsat);
+		if (always || gsv->new || nsat != gsv->satview)
+			/* do not cache, it serves to terminate the block */
+			publish_topicr("satview", FL_IGN_DEF_TALKER, "%i", nsat);
+		gsv->satview = nsat;
+		gsv->new = 0;
+
+		int satview = 0;
+		for (j = 0; j < ngsvs; ++j)
+			satview += gsvs[j].satview;
+		publish_topicrt("gn", "satview", FL_RETAIN, "%i", satview);
+	}
+}
+
+static void clear_sat(const char *talker, int prn)
+{
+	if (prn >= ssats)
+		return;
+	if (sats[prn].sent) {
+		/* remove retained msgs */
+		publish_topicrt(talker, mktopic("sat/%i/elv", prn), GSV_FLAGS, NULL);
+		publish_topicrt(talker, mktopic("sat/%i/azm", prn), GSV_FLAGS, NULL);
+		publish_topicrt(talker, mktopic("sat/%i/snr", prn), GSV_FLAGS, NULL);
+	}
+	memset(&sats[prn], 0, sizeof(sats[prn]));
+}
+
+static void clear_gsvs(void)
+{
+	int j, k;
+	struct gsv *gsv;
+
+	for (j = 0, gsv = gsvs; j < ngsvs; ++j, ++gsv) {
+		for (k = gsv->satmin; k <= gsv->satmax; ++k)
+			clear_sat(gsv->talker, k);
+		publish_topicrt(gsv->talker, "satview", GSV_FLAGS, NULL);
+		gsv->satview = 0;
+	}
+	ngsvs = 0;
+	sgsvs = 0;
+	ssats = 0;
+	if (sats)
+		free(sats);
+	if (gsvs)
+		free(gsvs);
 }
 
 static void recvd_txt(void)
@@ -1041,6 +1167,7 @@ gps_done:
 	}
 
 	erase_topics(1);
+	clear_gsvs();
 	/* terminate */
 	send_self_sync(mosq);
 	while (!ready) {

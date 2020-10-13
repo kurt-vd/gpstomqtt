@@ -190,11 +190,11 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 		ret = strtoul(msg->payload ?: "", NULL, 0);
 		mylog(LOG_WARNING, "gps %s", ret ? "alive" : "dead");
 
-	} else if (!strcmp("satview", str)) {
+	} else if (!msg->retained && !strcmp("satview", str)) {
+		alarm(0);
 		print_snr();
 
 	} else if (!strcmp("snr", str)) {
-		alarm(0);
 		/* parse SNR */
 		char *talker = strtok(msg->topic+topicprefixlen, "/");
 		strtok(NULL, "/"); /* 'sat' */

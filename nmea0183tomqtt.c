@@ -323,8 +323,9 @@ static const char *mktopic(const char *fmt, ...)
 	return topic;
 }
 
-#define FL_RETAIN 1
-#define FL_IGN_DEF_TALKER 2
+#define FL_RETAIN		(1 << 0)
+#define FL_IGN_DEF_TALKER	(1 << 1)
+#define FL_NO_CACHE		(1 << 2)
 
 #define publish_topic(topic, vfmt, ...) publish_topicrt(talker, (topic), FL_RETAIN, (vfmt), ##__VA_ARGS__)
 #define publish_topicr(topic, flags, vfmt, ...) publish_topicrt(talker, (topic), (flags), (vfmt), ##__VA_ARGS__)
@@ -337,9 +338,12 @@ static void publish_topicrt(const char *talker, const char *topic, int flags, co
 	static char value[1024];
 	static char realtopic[1024];
 
-	va_start(va, vfmt);
-	vsprintf(value, vfmt, va);
-	va_end(va);
+	if (vfmt) {
+		va_start(va, vfmt);
+		vsprintf(value, vfmt, va);
+		va_end(va);
+	} else
+		value[0] = 0;
 
 	if (!strcmp(value, "nan"))
 		strcpy(value, "");
@@ -349,16 +353,16 @@ static void publish_topicrt(const char *talker, const char *topic, int flags, co
 	else
 		sprintf(realtopic, "%s%s", topicprefix, topic);
 
-	publish_cache(realtopic, value, flags & FL_RETAIN);
+	publish_cache(realtopic, value, flags);
 }
 
-static void publish_cache(const char *realtopic, const char *value, int retain)
+static void publish_cache(const char *realtopic, const char *value, int flags)
 {
 	int ret;
 	struct topic *it;
 
-	if (!retain) {
-		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
+	if (!(flags & FL_RETAIN) || (flags & FL_NO_CACHE)) {
+		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, flags & FL_RETAIN);
 		if (ret)
 			mylog(LOG_ERR | LOG_EXIT, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
 		return;
@@ -382,7 +386,7 @@ static void publish_cache(const char *realtopic, const char *value, int retain)
 		}
 		it->topic = strdup(realtopic);
 		/* save 'retain' only once */
-		it->retain = retain;
+		it->retain = 1;
 		it->ctrltopic = !in_data_sentence;
 	}
 	it->written = 1;

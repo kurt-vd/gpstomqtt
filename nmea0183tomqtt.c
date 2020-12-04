@@ -226,7 +226,7 @@ static void merge_nmea_use(char *msgs)
 	if (msgs[0] != '+' && msgs[0] != '-') {
 		/* absolute mode, reset all */
 		for (str = nmea_use; *str; str += 5)
-			*(str-1) = '-';
+			*str = '-';
 	}
 	for (tok = strtok(msgs, ","); tok; tok = strtok(NULL, ",")) {
 		if (strchr("+-", tok[0]))

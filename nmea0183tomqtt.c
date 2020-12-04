@@ -551,8 +551,11 @@ static void recvd_gga_gns(const char *msg)
 					"%s", fromtable(strquality, ival) ?: "");
 		}
 	}
-	/* satvis */
-	publish_topic("satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
+	/* sats-in-use */
+	int satuse = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	publish_topic("satuse", "%i", satuse);
+	/* publish to the legacy 'satvis' too */
+	publish_topic("satvis", "%i", satuse);
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
 	if (nmea_use_msg("GSA"))

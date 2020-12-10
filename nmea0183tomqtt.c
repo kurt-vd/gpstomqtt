@@ -240,6 +240,8 @@ static void merge_nmea_use(char *msgs)
 	}
 }
 
+static void clear_gsvs(void);
+
 /* MQTT API */
 static char *myuuid;
 static const char selfsynctopic[] = "tmp/selfsync";
@@ -277,8 +279,11 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 		if (!strcmp(stopic, "msgs")) {
 			if (!msg->payloadlen)
 				return;
+			int gsv = nmea_use_msg("gsv");
 			merge_nmea_use((char *)msg->payload);
 			mylog(LOG_NOTICE, "nmea msgs changed to '%s'", nmea_use);
+			if (gsv && !nmea_use_msg("gsv"))
+				clear_gsvs();
 
 		} else if (!strcmp(stopic, "always")) {
 			always = strtoul((char *)msg->payload ?: "0", NULL, 0);

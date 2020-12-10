@@ -631,6 +631,7 @@ struct gsv {
 	char talker[3];
 	int satmin, satmax;
 	int satview;
+	int sattrack, sattrack_saved;
 	int new;
 	time_t trecvd;
 };
@@ -679,6 +680,7 @@ static void recvd_gsv(void)
 		/* start of block */
 		for (j = gsv->satmin; j <= gsv->satmax && j < ssats; ++j)
 			sats[j].recvd = 0;
+		gsv->sattrack = 0;
 	}
 
 	for (j = 0; j < 4; ++j) {
@@ -719,6 +721,10 @@ static void recvd_gsv(void)
 		sat->recvd = 1;
 		sat->sent = 1;
 
+		/* count nr. of really recvd sats */
+		if (sat->snr >= 0)
+			++gsv->sattrack;
+
 		/* keep track of min/max prn of a talker */
 		if (prn < gsv->satmin || !gsv->satmax)
 			gsv->satmin = prn;
@@ -737,12 +743,19 @@ static void recvd_gsv(void)
 			/* do not cache, it serves to terminate the block */
 			publish_topicr("satview", FL_IGN_DEF_TALKER, "%i", nsat);
 		gsv->satview = nsat;
+		if (always || gsv->new || gsv->sattrack != gsv->sattrack_saved)
+			publish_topicr("sattrack", FL_IGN_DEF_TALKER, "%i", gsv->sattrack);
+		gsv->sattrack_saved = gsv->sattrack;
 		gsv->new = 0;
 
 		int satview = 0;
-		for (j = 0; j < ngsvs; ++j)
+		int sattrack = 0;
+		for (j = 0; j < ngsvs; ++j) {
 			satview += gsvs[j].satview;
+			sattrack += gsvs[j].sattrack_saved;
+		}
 		publish_topicrt("gn", "satview", FL_RETAIN, "%i", satview);
+		publish_topicrt("gn", "sattrack", FL_RETAIN, "%i", sattrack);
 	}
 }
 
@@ -768,7 +781,10 @@ static void clear_gsvs(void)
 		for (k = gsv->satmin; k <= gsv->satmax; ++k)
 			clear_sat(gsv->talker, k);
 		publish_topicrt(gsv->talker, "satview", GSV_FLAGS, NULL);
+		publish_topicrt(gsv->talker, "sattrack", GSV_FLAGS, NULL);
 		gsv->satview = 0;
+		gsv->sattrack = 0;
+		gsv->sattrack_saved = 0;
 	}
 	ngsvs = 0;
 	sgsvs = 0;

@@ -688,7 +688,7 @@ static void recvd_gsv(void)
 		prn = strtoul(tok, NULL, 10);
 		elv = strtoul(nmea_safe_tok(NULL), NULL, 10);
 		azm = strtoul(nmea_safe_tok(NULL), NULL, 10);
-		snr = strtoul(nmea_safe_tok(NULL), NULL, 10);
+		snr = strtoul(nmea_tok(NULL) ?: "-1", NULL, 10);
 
 		if (prn > ssats) {
 			int oldssats = ssats;
@@ -712,7 +712,7 @@ static void recvd_gsv(void)
 		if (always || !sat->sent || azm != sat->azm)
 			publish_topicr(mktopic("sat/%i/azm", prn), GSV_FLAGS, "%i", azm);
 		if (always || !sat->sent || snr != sat->snr)
-			publish_topicr(mktopic("sat/%i/snr", prn), GSV_FLAGS, "%i", snr);
+			publish_topicr(mktopic("sat/%i/snr", prn), GSV_FLAGS, (snr < 0) ? "" : "%i", snr);
 		sat->elv = elv;
 		sat->azm = azm;
 		sat->snr = snr;

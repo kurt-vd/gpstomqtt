@@ -641,16 +641,9 @@ static int ngsvs, sgsvs;
 
 static void clear_sat(const char *talker, int prn);
 
-static void recvd_gsv(void)
+static struct gsv *find_gsv(const char *talker)
 {
-	__attribute__((unused))
-	int msgcnt, msgidx;
-	int nsat;
-	int prn, elv, azm, snr;
-	int j;
-	char *tok;
 	struct gsv *gsv, *gsvend;
-	struct sat *sat;
 
 	gsvend = gsvs+ngsvs;
 	for (gsv = gsvs; gsv < gsvend; ++gsv) {
@@ -670,6 +663,21 @@ static void recvd_gsv(void)
 		strcpy(gsv->talker, talker);
 		gsv->new = 1;
 	}
+	return gsv;
+}
+
+static void recvd_gsv(void)
+{
+	__attribute__((unused))
+	int msgcnt, msgidx;
+	int nsat;
+	int prn, elv, azm, snr;
+	int j;
+	char *tok;
+	struct gsv *gsv;
+	struct sat *sat;
+
+	gsv = find_gsv(talker);
 
 	msgcnt = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	msgidx = strtoul(nmea_safe_tok(NULL), NULL, 10);

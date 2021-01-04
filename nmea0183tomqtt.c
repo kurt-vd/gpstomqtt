@@ -558,9 +558,7 @@ static void recvd_gga_gns(const char *msg)
 	}
 	/* sats-in-use */
 	int satuse = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	publish_topic("satuse", "%i", satuse);
-	/* publish to the legacy 'satvis' too */
-	publish_topic("satvis", "%i", satuse);
+	publish_topicr("satuse", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", satuse);
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
 	if (nmea_use_msg("GSA"))
@@ -762,8 +760,8 @@ static void recvd_gsv(void)
 			satview += gsvs[j].satview;
 			sattrack += gsvs[j].sattrack_saved;
 		}
-		publish_topicrt("gn", "satview", FL_RETAIN, "%i", satview);
-		publish_topicrt("gn", "sattrack", FL_RETAIN, "%i", sattrack);
+		publish_topicrt("gn", "satview", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", satview);
+		publish_topicrt("gn", "sattrack", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", sattrack);
 	}
 }
 

@@ -241,6 +241,7 @@ static void merge_nmea_use(char *msgs)
 }
 
 static void clear_gsvs(void);
+static void satuse_updated(const char *talker, int satuse);
 
 /* MQTT API */
 static char *myuuid;
@@ -559,6 +560,7 @@ static void recvd_gga_gns(const char *msg)
 	/* sats-in-use */
 	int satuse = strtoul(nmea_safe_tok(NULL), NULL, 10);
 	publish_topicr("satuse", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", satuse);
+	satuse_updated(talker, satuse);
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
 	if (nmea_use_msg("GSA"))
@@ -630,6 +632,7 @@ struct gsv {
 	int satmin, satmax;
 	int satview;
 	int sattrack, sattrack_saved;
+	int satuse;
 	int new;
 	time_t trecvd;
 };
@@ -662,6 +665,33 @@ static struct gsv *find_gsv(const char *talker)
 		gsv->new = 1;
 	}
 	return gsv;
+}
+
+static void satuse_updated(const char *talker, int satuse)
+{
+	struct gsv *gsv;
+	int j, gn_satuse;
+	static int gn_satuse_emitted;
+
+	if (!strcmp(talker ?: "", "gn")) {
+		gn_satuse_emitted = 1;
+		/* ignore "GN", I'm aggregating it */
+		return;
+	}
+	if (gn_satuse_emitted)
+		/* device emit's satuse already */
+		return;
+
+	gsv = find_gsv(talker);
+
+	if (always || gsv->satuse != satuse) {
+		gsv->satuse = satuse;
+		/* redo gn/satuse */
+		gn_satuse = 0;
+		for (j = 0; j < ngsvs; ++j)
+			gn_satuse += gsvs[j].satuse;
+		publish_topicrt("gn", "satuse", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", gn_satuse);
+	}
 }
 
 static void recvd_gsv(void)

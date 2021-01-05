@@ -827,8 +827,10 @@ static void clear_gsvs(void)
 	ssats = 0;
 	if (sats)
 		free(sats);
+	sats = NULL;
 	if (gsvs)
 		free(gsvs);
+	gsvs = NULL;
 }
 
 static void recvd_txt(void)

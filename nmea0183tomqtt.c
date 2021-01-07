@@ -101,7 +101,8 @@ static const char help_msg[] =
 	" -V, --version		Show version\n"
 	" -v, --verbose		Be more verbose\n"
 	" -h, --host=HOST[:PORT]Specify alternate MQTT host+port\n"
-	" -n, --nmea=GGA[,ZDA...]	Specify what message to forward\n"
+	" -n, --nmea=GGA[,ZDA...]	Specify what message to forward, absolute mode\n"
+	" -n, --nmea=+/-GGA[,+/-ZDA...]	Specify what message to forward, relative mode\n"
 	"		Possible messages are:\n"
 	"		*GGA	lon, lat, alt, hdop, quality\n"
 	"		 GNS	lon, lat, alt, hdop, quality for all talkers\n"
@@ -127,7 +128,7 @@ static const char help_msg[] =
 	" FILE|DEVICE	Read input from FILE or DEVICE\n"
 	"\n"
 	"Runtime configuration via MQTT\n"
-	" <PREFIX>/cfg/msgs	overrule --nmea parameter (empty value reverts to original)\n"
+	" <PREFIX>/cfg/msgs	identical to --nmea parameter\n"
 	" <PREFIX>/cfg/always	set --always parameter\n"
 	" <PREFIX>/cfg/deadtime	set --deadtime parameter\n"
 	" <PREFIX>/cfg/default	set --default parameter\n"
@@ -170,8 +171,7 @@ static char *file = "<stdin>";
 /* state */
 static struct mosquitto *mosq;
 
-static const char *nmea_use = "gga,zda,vtg";
-static char *nmea_use_mqtt; /* overrule nmea_use from mqtt */
+static char nmea_use[] = "+gga,-gns,-gsa,-gsv,+vtg,+zda\0\0";
 static const char *def_talker = "gp";
 static char *def_talker_mqtt;
 static const char *topicprefix = "gps/";
@@ -208,6 +208,41 @@ static void my_exit(void)
 		mosquitto_disconnect(mosq);
 }
 
+/* message list api */
+static int nmea_use_msg(const char *msg)
+{
+	char *str;
+
+	str = strcasestr(nmea_use, msg);
+	if (!str)
+		return 0;
+	return *(str-1) == '+';
+}
+static void merge_nmea_use(char *msgs)
+{
+	char *tok, *str;
+	char mod;
+
+	if (msgs[0] != '+' && msgs[0] != '-') {
+		/* absolute mode, reset all */
+		for (str = nmea_use; *str; str += 5)
+			*str = '-';
+	}
+	for (tok = strtok(msgs, ","); tok; tok = strtok(NULL, ",")) {
+		if (strchr("+-", tok[0]))
+			mod = *tok++;
+		else
+			mod = '+';
+
+		str = strcasestr(nmea_use, tok);
+		if (str)
+			*(str-1) = mod;
+	}
+}
+
+static void clear_gsvs(void);
+static void satuse_updated(const char *talker, int satuse);
+
 /* MQTT API */
 static char *myuuid;
 static const char selfsynctopic[] = "tmp/selfsync";
@@ -243,10 +278,13 @@ static void my_mqtt_msg(struct mosquitto *mosq, void *dat, const struct mosquitt
 		const char *stopic = msg->topic + topicprefixlen + cfgprefixlen;
 
 		if (!strcmp(stopic, "msgs")) {
-			if (nmea_use_mqtt)
-				free(nmea_use_mqtt);
-			nmea_use_mqtt = msg->payloadlen ? strdup((char *)msg->payload) : NULL;
-			mylog(LOG_NOTICE, "nmea msgs overrule to '%s'", nmea_use_mqtt ?: "");
+			if (!msg->payloadlen)
+				return;
+			int gsv = nmea_use_msg("gsv");
+			merge_nmea_use((char *)msg->payload);
+			mylog(LOG_NOTICE, "nmea msgs changed to '%s'", nmea_use);
+			if (gsv && !nmea_use_msg("gsv"))
+				clear_gsvs();
 
 		} else if (!strcmp(stopic, "always")) {
 			always = strtoul((char *)msg->payload ?: "0", NULL, 0);
@@ -291,8 +329,9 @@ static const char *mktopic(const char *fmt, ...)
 	return topic;
 }
 
-#define FL_RETAIN 1
-#define FL_IGN_DEF_TALKER 2
+#define FL_RETAIN		(1 << 0)
+#define FL_IGN_DEF_TALKER	(1 << 1)
+#define FL_NO_CACHE		(1 << 2)
 
 #define publish_topic(topic, vfmt, ...) publish_topicrt(talker, (topic), FL_RETAIN, (vfmt), ##__VA_ARGS__)
 #define publish_topicr(topic, flags, vfmt, ...) publish_topicrt(talker, (topic), (flags), (vfmt), ##__VA_ARGS__)
@@ -305,9 +344,12 @@ static void publish_topicrt(const char *talker, const char *topic, int flags, co
 	static char value[1024];
 	static char realtopic[1024];
 
-	va_start(va, vfmt);
-	vsprintf(value, vfmt, va);
-	va_end(va);
+	if (vfmt) {
+		va_start(va, vfmt);
+		vsprintf(value, vfmt, va);
+		va_end(va);
+	} else
+		value[0] = 0;
 
 	if (!strcmp(value, "nan"))
 		strcpy(value, "");
@@ -317,16 +359,16 @@ static void publish_topicrt(const char *talker, const char *topic, int flags, co
 	else
 		sprintf(realtopic, "%s%s", topicprefix, topic);
 
-	publish_cache(realtopic, value, flags & FL_RETAIN);
+	publish_cache(realtopic, value, flags);
 }
 
-static void publish_cache(const char *realtopic, const char *value, int retain)
+static void publish_cache(const char *realtopic, const char *value, int flags)
 {
 	int ret;
 	struct topic *it;
 
-	if (!retain) {
-		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, retain);
+	if (!(flags & FL_RETAIN) || (flags & FL_NO_CACHE)) {
+		ret = mosquitto_publish(mosq, NULL, realtopic, strlen(value), value, mqtt_qos, flags & FL_RETAIN);
 		if (ret)
 			mylog(LOG_ERR | LOG_EXIT, "mosquitto_publish %s: %s", realtopic, mosquitto_strerror(ret));
 		return;
@@ -350,7 +392,7 @@ static void publish_cache(const char *realtopic, const char *value, int retain)
 		}
 		it->topic = strdup(realtopic);
 		/* save 'retain' only once */
-		it->retain = retain;
+		it->retain = 1;
 		it->ctrltopic = !in_data_sentence;
 	}
 	it->written = 1;
@@ -515,11 +557,13 @@ static void recvd_gga_gns(const char *msg)
 					"%s", fromtable(strquality, ival) ?: "");
 		}
 	}
-	/* satvis */
-	publish_topic("satvis", "%li", strtoul(nmea_safe_tok(NULL), NULL, 10));
+	/* sats-in-use */
+	int satuse = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	publish_topicr("satuse", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", satuse);
+	satuse_updated(talker, satuse);
 	/* hdop */
 	dval = nmea_strtod(nmea_safe_tok(NULL));
-	if (!strcasestr(nmea_use_mqtt ?: nmea_use, "GSA"))
+	if (nmea_use_msg("GSA"))
 		/* publish hdop from GGA only if GSA is not used */
 		publish_topic("hdop", "%.1lf", dval);
 	/* altitude */
@@ -564,18 +608,117 @@ static void recvd_gsa(void)
 	}
 }
 
+/* GSV: keep track of satellites */
+struct sat {
+	int snr;
+	int elv;
+	int azm;
+	int8_t recvd; /* recvd from NMEA */
+	int8_t sent; /* sent to MQTT */
+};
+static struct sat *sats;
+static int ssats;
+/* range of sat. ids:
+ * 1..32: GPS
+ * 33..54: SBAS
+ * 64..88/96: GLONASS
+ * 193..195: QZSS
+ * 201..235: Beidou
+ * 301..336: Galileo
+ */
+
+struct gsv {
+	char talker[3];
+	int satmin, satmax;
+	int satview;
+	int sattrack, sattrack_saved;
+	int satuse;
+	int new;
+	time_t trecvd;
+};
+
+static struct gsv *gsvs;
+static int ngsvs, sgsvs;
+
+static void clear_sat(const char *talker, int prn);
+
+static struct gsv *find_gsv(const char *talker)
+{
+	struct gsv *gsv, *gsvend;
+
+	gsvend = gsvs+ngsvs;
+	for (gsv = gsvs; gsv < gsvend; ++gsv) {
+		if (!strcmp(talker, gsv->talker))
+			break;
+	}
+	if (gsv >= gsvend) {
+		if (ngsvs >= sgsvs) {
+			sgsvs += 16;
+			gsvs = realloc(gsvs, sgsvs*sizeof(*gsvs));
+			if (!gsvs)
+				mylog(LOG_ERR | LOG_EXIT, "realloc %u gsvs: %s", sgsvs, ESTR(errno));
+		}
+		gsv = gsvs+ngsvs++;
+		/* init new gsv struct */
+		memset(gsv, 0, sizeof(*gsv));
+		strcpy(gsv->talker, talker);
+		gsv->new = 1;
+	}
+	return gsv;
+}
+
+static void satuse_updated(const char *talker, int satuse)
+{
+	struct gsv *gsv;
+	int j, gn_satuse;
+	static int gn_satuse_emitted;
+
+	if (!strcmp(talker ?: "", "gn")) {
+		gn_satuse_emitted = 1;
+		/* ignore "GN", I'm aggregating it */
+		return;
+	}
+	if (gn_satuse_emitted)
+		/* device emit's satuse already */
+		return;
+
+	gsv = find_gsv(talker);
+
+	if (always || gsv->satuse != satuse) {
+		gsv->satuse = satuse;
+		/* redo gn/satuse */
+		gn_satuse = 0;
+		for (j = 0; j < ngsvs; ++j)
+			gn_satuse += gsvs[j].satuse;
+		publish_topicrt("gn", "satuse", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", gn_satuse);
+	}
+}
+
 static void recvd_gsv(void)
 {
 	__attribute__((unused))
-	int isent, nsent;
+	int msgcnt, msgidx;
+	int nsat;
 	int prn, elv, azm, snr;
 	int j;
 	char *tok;
-	const char *topic;
+	struct gsv *gsv;
+	struct sat *sat;
 
-	nsent = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	isent = strtoul(nmea_safe_tok(NULL), NULL, 10);
-	nmea_tok(NULL); /* #sats in view */
+	gsv = find_gsv(talker);
+
+	msgcnt = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	msgidx = strtoul(nmea_safe_tok(NULL), NULL, 10);
+	nsat = strtoul(nmea_safe_tok(NULL), NULL, 10); /* #sats in view */
+
+	gsv->trecvd = time(NULL);
+	if (msgidx == 1) {
+		/* start of block */
+		for (j = gsv->satmin; j <= gsv->satmax && j < ssats; ++j)
+			sats[j].recvd = 0;
+		gsv->sattrack = 0;
+	}
+
 	for (j = 0; j < 4; ++j) {
 		tok = nmea_safe_tok(NULL);
 		if (!strlen(tok))
@@ -583,22 +726,111 @@ static void recvd_gsv(void)
 		prn = strtoul(tok, NULL, 10);
 		elv = strtoul(nmea_safe_tok(NULL), NULL, 10);
 		azm = strtoul(nmea_safe_tok(NULL), NULL, 10);
-		snr = strtoul(nmea_safe_tok(NULL), NULL, 10);
+		snr = strtoul(nmea_tok(NULL) ?: "-1", NULL, 10);
+
+		if (prn > ssats) {
+			int oldssats = ssats;
+			ssats = ssats ? ((prn + 127) & ~127) : 128;
+			sats = realloc(sats, sizeof(*sats)*ssats);
+			if (!sats)
+				mylog(LOG_ERR | LOG_EXIT, "realloc %i sats: %s", ssats, ESTR(errno));
+			memset(sats+oldssats, 0, sizeof(*sats)*(ssats - oldssats));
+		}
+
+		sat = sats+prn;
 
 		/* publish satellite info non-retained.
 		 * retained messages should be cleaned up,
 		 * which implies that we must listen to our own sat info
 		 * an remove 'lost' satellites ...
 		 */
-		topic = mktopic("sat/%i/elv", prn);
-		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", elv);
+#define GSV_FLAGS	(FL_RETAIN | FL_NO_CACHE | FL_IGN_DEF_TALKER)
+		if (always || !sat->sent || elv != sat->elv)
+			publish_topicr(mktopic("sat/%i/elv", prn), GSV_FLAGS, "%i", elv);
+		if (always || !sat->sent || azm != sat->azm)
+			publish_topicr(mktopic("sat/%i/azm", prn), GSV_FLAGS, "%i", azm);
+		if (always || !sat->sent || snr != sat->snr)
+			publish_topicr(mktopic("sat/%i/snr", prn), GSV_FLAGS, (snr < 0) ? "" : "%i", snr);
+		sat->elv = elv;
+		sat->azm = azm;
+		sat->snr = snr;
+		sat->recvd = 1;
+		sat->sent = 1;
 
-		topic = mktopic("sat/%i/azm", prn);
-		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", azm);
+		/* count nr. of really recvd sats */
+		if (sat->snr >= 0)
+			++gsv->sattrack;
 
-		topic = mktopic("sat/%i/snr", prn);
-		publish_topicr(topic, FL_IGN_DEF_TALKER, "%i", snr);
+		/* keep track of min/max prn of a talker */
+		if (prn < gsv->satmin || !gsv->satmax)
+			gsv->satmin = prn;
+		if (prn > gsv->satmax)
+			gsv->satmax = prn;
 	}
+	if (msgidx == msgcnt) {
+		for (j = gsv->satmin; j < gsv->satmax; ++j)
+			if (sats[j].sent && !sats[j].recvd)
+				clear_sat(talker, j);
+		/* emit number of sats in view
+		 * not to confuse with 'satvis' which is actually 'satinuse'
+		 * This can also act as a terminator of the satellite list
+		 */
+		if (always || gsv->new || nsat != gsv->satview)
+			/* do not cache, it serves to terminate the block */
+			publish_topicr("satview", FL_IGN_DEF_TALKER, "%i", nsat);
+		gsv->satview = nsat;
+		if (always || gsv->new || gsv->sattrack != gsv->sattrack_saved)
+			publish_topicr("sattrack", FL_IGN_DEF_TALKER, "%i", gsv->sattrack);
+		gsv->sattrack_saved = gsv->sattrack;
+		gsv->new = 0;
+
+		int satview = 0;
+		int sattrack = 0;
+		for (j = 0; j < ngsvs; ++j) {
+			satview += gsvs[j].satview;
+			sattrack += gsvs[j].sattrack_saved;
+		}
+		publish_topicrt("gn", "satview", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", satview);
+		publish_topicrt("gn", "sattrack", FL_RETAIN | FL_IGN_DEF_TALKER, "%i", sattrack);
+	}
+}
+
+static void clear_sat(const char *talker, int prn)
+{
+	if (prn >= ssats)
+		return;
+	if (sats[prn].sent) {
+		/* remove retained msgs */
+		publish_topicrt(talker, mktopic("sat/%i/elv", prn), GSV_FLAGS, NULL);
+		publish_topicrt(talker, mktopic("sat/%i/azm", prn), GSV_FLAGS, NULL);
+		publish_topicrt(talker, mktopic("sat/%i/snr", prn), GSV_FLAGS, NULL);
+	}
+	memset(&sats[prn], 0, sizeof(sats[prn]));
+}
+
+static void clear_gsvs(void)
+{
+	int j, k;
+	struct gsv *gsv;
+
+	for (j = 0, gsv = gsvs; j < ngsvs; ++j, ++gsv) {
+		for (k = gsv->satmin; k <= gsv->satmax; ++k)
+			clear_sat(gsv->talker, k);
+		publish_topicrt(gsv->talker, "satview", GSV_FLAGS, NULL);
+		publish_topicrt(gsv->talker, "sattrack", GSV_FLAGS, NULL);
+		gsv->satview = 0;
+		gsv->sattrack = 0;
+		gsv->sattrack_saved = 0;
+	}
+	ngsvs = 0;
+	sgsvs = 0;
+	ssats = 0;
+	if (sats)
+		free(sats);
+	sats = NULL;
+	if (gsvs)
+		free(gsvs);
+	gsvs = NULL;
 }
 
 static void recvd_txt(void)
@@ -678,7 +910,7 @@ static void recvd_line(char *line)
 
 	if (!strcmp(tok+2, "TXT"))
 		recvd_txt();
-	else if (!strcasestr(nmea_use_mqtt ?: nmea_use, tok+2))
+	else if (!nmea_use_msg(tok+2))
 		/* this sentence is blocked */
 		goto done;
 	else if (!strcmp(tok+2, "GGA") || !strcmp(tok+2, "GNS"))
@@ -821,7 +1053,9 @@ int main(int argc, char *argv[])
 		}
 		break;
 	case 'n':
-		nmea_use = optarg;
+		optarg = strdup(optarg);
+		merge_nmea_use(optarg);
+		free(optarg);
 		break;
 	case 'p':
 		topicprefix = optarg;
@@ -995,6 +1229,7 @@ gps_done:
 	}
 
 	erase_topics(1);
+	clear_gsvs();
 	/* terminate */
 	send_self_sync(mosq);
 	while (!ready) {

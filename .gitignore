@@ -1,6 +1,7 @@
 # output
 *.o
 nmea0183tomqtt
+nmea-snr
 
 # environment
 tags

@@ -1,4 +1,5 @@
 PROGS	= nmea0183tomqtt
+PROGS	+= nmea-snr
 default	: $(PROGS)
 
 PREFIX	= /usr/local
